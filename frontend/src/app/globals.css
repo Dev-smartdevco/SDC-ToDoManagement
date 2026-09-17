@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --sidebar: #0c1524;
+  --accent: #3a96d4;
+  --accent-soft: #e7f3fb;
+  --ink: #132033;
+  --muted: #5c6d80;
+  --line: #e4e9ef;
+  --success: #0f9d6e;
+  --warning: #d97706;
+  --danger: #dc3d3d;
+}
+
+html,
+body {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  font-feature-settings: "ss01" on, "cv11" on;
+}
+
+html[dir="rtl"] body {
+  font-family: var(--font-arabic), var(--font-sans), sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c9d3de transparent;
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+}
+
+.progress-track {
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
