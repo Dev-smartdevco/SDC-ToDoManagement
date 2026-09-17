@@ -1,7 +1,7 @@
 "use client";
 
 import type { Task } from "@/lib/types";
-import { ProjectBadge } from "@/components/ui/ProjectBadge";
+import { ContextBadge } from "@/components/ui/ContextBadge";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { useI18n } from "@/lib/i18n";
@@ -12,7 +12,11 @@ export function TaskDetails({ task }: { task: Task }) {
     <div className="space-y-3 text-sm">
       <h3 className="text-base font-semibold">{task.title}</h3>
       <div className="flex flex-wrap gap-3">
-        <ProjectBadge name={task.project?.name} color={task.project?.color} />
+        <ContextBadge
+          project={task.project?.name}
+          category={task.category?.name}
+          color={task.category?.color ?? task.project?.color}
+        />
         <PriorityBadge priority={task.priority} />
         <StatusBadge status={task.status} />
       </div>

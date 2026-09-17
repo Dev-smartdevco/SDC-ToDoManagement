@@ -17,6 +17,7 @@ export default function NotesPage() {
   const router = useRouter();
   const [q, setQ] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [tag, setTag] = useState("");
   const search = useDebouncedValue(q, 250);
 
@@ -24,12 +25,18 @@ export default function NotesPage() {
     const p = new URLSearchParams();
     if (search) p.set("q", search);
     if (projectId) p.set("projectId", projectId);
+    if (categoryId) p.set("categoryId", categoryId);
     if (tag) p.set("tag", tag);
     return p.toString();
-  }, [search, projectId, tag]);
+  }, [search, projectId, categoryId, tag]);
 
   const notesQuery = useQuery({ queryKey: useScopedKey(["notes", params]), queryFn: () => endpoints.notes(params) });
   const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects });
+  const categoriesQuery = useQuery({
+    queryKey: useScopedKey(["categories", projectId]),
+    queryFn: () => endpoints.projectCategories(projectId),
+    enabled: Boolean(projectId),
+  });
   const tags = Array.from(new Set((notesQuery.data ?? []).flatMap((n) => n.tags)));
 
   return (
@@ -51,11 +58,25 @@ export default function NotesPage() {
       <div className="mb-4 space-y-3">
         <SearchBar value={q} onChange={setQ} placeholder={t("searchNotes")} />
         <FilterBar>
-          <Select value={projectId} onChange={setProjectId}>
+          <Select
+            value={projectId}
+            onChange={(value) => {
+              setProjectId(value);
+              setCategoryId("");
+            }}
+          >
             <option value="">{t("project")}</option>
             {(projectsQuery.data ?? []).map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
+              </option>
+            ))}
+          </Select>
+          <Select value={categoryId} onChange={setCategoryId}>
+            <option value="">{t("category")}</option>
+            {(categoriesQuery.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
             ))}
           </Select>

@@ -15,6 +15,22 @@ export type Project = {
   completedTasks?: number;
   taskCount?: number;
   noteCount?: number;
+  categoryCount?: number;
+};
+
+export type Category = {
+  id: string;
+  name: string;
+  description?: string | null;
+  projectId: string;
+  icon: string;
+  color: string;
+  sortOrder: number;
+  archived?: boolean;
+  taskCount?: number;
+  completedTasks?: number;
+  openTasks?: number;
+  project?: Pick<Project, "id" | "name" | "color"> | null;
 };
 
 export type Tag = { id: string; name: string };
@@ -24,6 +40,7 @@ export type Task = {
   title: string;
   description?: string | null;
   projectId?: string | null;
+  categoryId?: string | null;
   status: TaskStatus;
   priority: Priority;
   dueDate?: string | null;
@@ -36,6 +53,7 @@ export type Task = {
   createdAt: string;
   updatedAt: string;
   project?: Pick<Project, "id" | "name" | "color" | "icon"> | null;
+  category?: Pick<Category, "id" | "name" | "color" | "icon" | "projectId"> | null;
   tags?: Tag[];
   daysOverdue?: number;
 };
@@ -45,11 +63,13 @@ export type Note = {
   title: string;
   content: string;
   projectId?: string | null;
+  categoryId?: string | null;
   taskId?: string | null;
   tags: string[];
   createdAt: string;
   updatedAt: string;
   project?: Pick<Project, "id" | "name" | "color"> | null;
+  category?: Pick<Category, "id" | "name" | "color" | "icon" | "projectId"> | null;
   task?: { id: string; title: string } | null;
 };
 
@@ -112,6 +132,15 @@ export type ProjectDetails = Project & {
   overdueTasks: Task[];
   upcomingTasks: Task[];
   notes: Note[];
+  categories: Category[];
+};
+
+export type DashboardStats = {
+  totalTasks: number;
+  completedTasks: number;
+  openTasks: number;
+  overdueTasks: number;
+  categories: Category[];
 };
 
 export type TaskListResponse = {

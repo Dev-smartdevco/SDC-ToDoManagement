@@ -13,6 +13,7 @@ notesRouter.get(
     const data = await notesService.listNotes((req as AuthRequest).userId, {
       q: typeof req.query.q === "string" ? req.query.q : undefined,
       projectId: typeof req.query.projectId === "string" ? req.query.projectId : undefined,
+      categoryId: typeof req.query.categoryId === "string" ? req.query.categoryId : undefined,
       tag: typeof req.query.tag === "string" ? req.query.tag : undefined,
     });
     res.json(data);

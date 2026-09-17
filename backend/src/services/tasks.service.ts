@@ -2,8 +2,16 @@ import { Prisma, type Priority, type TaskStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { errors } from "../lib/httpError.js";
 import { addDaysIso, todayIso } from "../lib/dates.js";
+import { assertCategoryForProject, categorySelect, projectSelect } from "../lib/category.js";
 
 export type TaskView = "all" | "inbox" | "today" | "upcoming" | "overdue" | "completed";
+
+const taskInclude = {
+  project: { select: projectSelect },
+  category: { select: categorySelect },
+  tags: { include: { tag: true } },
+  _count: { select: { subtasks: true } },
+};
 
 function serializeTask<T extends { tags: { tag: { id: string; name: string } }[] }>(task: T) {
   const { tags, ...rest } = task;
@@ -29,24 +37,34 @@ async function syncTags(userId: string, taskId: string, names: string[]) {
   }
 }
 
-export function buildTaskWhere(userId: string, query: {
-  view?: TaskView;
-  projectId?: string;
-  priority?: Priority;
-  status?: TaskStatus;
-  q?: string;
-  date?: string;
-}) {
+export function buildTaskWhere(
+  userId: string,
+  query: {
+    view?: TaskView;
+    projectId?: string;
+    categoryId?: string;
+    priority?: Priority;
+    status?: TaskStatus;
+    q?: string;
+    date?: string;
+    dueDate?: string;
+  },
+) {
   const today = query.date ?? todayIso();
   const where: Prisma.TaskWhereInput = { userId, parentTaskId: null };
 
   if (query.projectId) where.projectId = query.projectId;
+  if (query.categoryId) where.categoryId = query.categoryId;
   if (query.priority) where.priority = query.priority;
   if (query.status) where.status = query.status;
+  if (query.dueDate) where.dueDate = query.dueDate;
   if (query.q) {
     where.OR = [
       { title: { contains: query.q, mode: "insensitive" } },
       { description: { contains: query.q, mode: "insensitive" } },
+      { project: { name: { contains: query.q, mode: "insensitive" } } },
+      { category: { name: { contains: query.q, mode: "insensitive" } } },
+      { notes: { some: { OR: [{ title: { contains: query.q, mode: "insensitive" } }, { content: { contains: query.q, mode: "insensitive" } }] } } },
     ];
   }
 
@@ -81,10 +99,12 @@ export async function listTasks(
   query: {
     view?: TaskView;
     projectId?: string;
+    categoryId?: string;
     priority?: Priority;
     status?: TaskStatus;
     q?: string;
     date?: string;
+    dueDate?: string;
     page?: number;
     limit?: number;
   },
@@ -99,11 +119,7 @@ export async function listTasks(
       orderBy: [{ status: "asc" }, { priority: "desc" }, { dueDate: "asc" }, { createdAt: "desc" }],
       skip: (page - 1) * limit,
       take: limit,
-      include: {
-        project: { select: { id: true, name: true, color: true, icon: true } },
-        tags: { include: { tag: true } },
-        _count: { select: { subtasks: true } },
-      },
+      include: taskInclude,
     }),
     prisma.task.count({ where }),
   ]);
@@ -121,8 +137,7 @@ export async function getTask(userId: string, id: string) {
   const task = await prisma.task.findFirst({
     where: { id, userId },
     include: {
-      project: { select: { id: true, name: true, color: true, icon: true } },
-      tags: { include: { tag: true } },
+      ...taskInclude,
       subtasks: { orderBy: { createdAt: "asc" } },
       notes: { orderBy: { updatedAt: "desc" } },
     },
@@ -137,6 +152,7 @@ export async function createTask(
     title: string;
     description?: string | null;
     projectId?: string | null;
+    categoryId?: string | null;
     status?: TaskStatus;
     priority?: Priority;
     dueDate?: string | null;
@@ -146,12 +162,14 @@ export async function createTask(
     tags?: string[];
   },
 ) {
+  await assertCategoryForProject(userId, data.categoryId, data.projectId ?? null);
   const task = await prisma.task.create({
     data: {
       userId,
       title: data.title,
       description: data.description ?? null,
       projectId: data.projectId ?? null,
+      categoryId: data.categoryId ?? null,
       status: data.status ?? (data.dueDate ? "TODO" : "INBOX"),
       priority: data.priority ?? "MEDIUM",
       dueDate: data.dueDate ?? null,
@@ -171,6 +189,7 @@ export async function updateTask(
     title?: string;
     description?: string | null;
     projectId?: string | null;
+    categoryId?: string | null;
     status?: TaskStatus;
     priority?: Priority;
     dueDate?: string | null;
@@ -183,6 +202,13 @@ export async function updateTask(
 ) {
   const existing = await prisma.task.findFirst({ where: { id, userId } });
   if (!existing) throw errors.notFound("Task");
+
+  const nextProjectId = data.projectId !== undefined ? data.projectId : existing.projectId;
+  let nextCategoryId = data.categoryId !== undefined ? data.categoryId : existing.categoryId;
+  if (data.projectId !== undefined && data.projectId !== existing.projectId && data.categoryId === undefined) {
+    nextCategoryId = null;
+  }
+  await assertCategoryForProject(userId, nextCategoryId, nextProjectId);
 
   const nextStatus = data.status ?? existing.status;
   const completedAt =
@@ -198,6 +224,7 @@ export async function updateTask(
       title: data.title,
       description: data.description,
       projectId: data.projectId,
+      categoryId: nextCategoryId,
       status: data.status,
       priority: data.priority,
       dueDate: data.dueDate,
@@ -236,6 +263,7 @@ export async function duplicateTask(userId: string, id: string) {
     title: `${task.title} (copy)`,
     description: task.description,
     projectId: task.projectId,
+    categoryId: task.categoryId,
     status: "TODO",
     priority: task.priority,
     dueDate: task.dueDate,

@@ -168,6 +168,113 @@ describe("MY OS API", () => {
     expect(Number.isFinite(res.body.today.completion)).toBe(true);
   });
 
+  it("manages categories and task filtering", async () => {
+    const created = await request(app)
+      .post("/api/categories")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ projectId, name: "QA Lab", icon: "workflow", color: "#334155" });
+    expect(created.status).toBe(201);
+    const categoryId = created.body.id as string;
+
+    const listed = await request(app)
+      .get(`/api/projects/${projectId}/categories`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(listed.status).toBe(200);
+    expect(listed.body.some((c: { id: string }) => c.id === categoryId)).toBe(true);
+
+    const renamed = await request(app)
+      .put(`/api/categories/${categoryId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "QA Lab Updated" });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.name).toBe("QA Lab Updated");
+
+    const emptyDelete = await request(app)
+      .post("/api/categories")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ projectId, name: "Empty Area" });
+    expect(emptyDelete.status).toBe(201);
+    const emptyId = emptyDelete.body.id as string;
+    const deletedEmpty = await request(app)
+      .delete(`/api/categories/${emptyId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({});
+    expect(deletedEmpty.status).toBe(200);
+
+    const withCategory = await request(app)
+      .post("/api/tasks")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Review Homepage", projectId, categoryId, priority: "HIGH" });
+    expect(withCategory.status).toBe(201);
+    expect(withCategory.body.categoryId).toBe(categoryId);
+    expect(withCategory.body.category?.name).toBe("QA Lab Updated");
+
+    const withoutCategory = await request(app)
+      .post("/api/tasks")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Uncategorized capture", projectId });
+    expect(withoutCategory.status).toBe(201);
+    expect(withoutCategory.body.categoryId).toBeNull();
+
+    const otherProject = await request(app)
+      .post("/api/projects")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "OTHER LAB" });
+    expect(otherProject.status).toBe(201);
+    const invalidAssign = await request(app)
+      .put(`/api/tasks/${withCategory.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ projectId: otherProject.body.id, categoryId });
+    expect(invalidAssign.status).toBe(400);
+
+    const projectChanged = await request(app)
+      .put(`/api/tasks/${withCategory.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ projectId: otherProject.body.id });
+    expect(projectChanged.status).toBe(200);
+    expect(projectChanged.body.categoryId).toBeNull();
+
+    await request(app)
+      .put(`/api/tasks/${withCategory.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ projectId, categoryId });
+
+    const filtered = await request(app)
+      .get(`/api/tasks?projectId=${projectId}&categoryId=${categoryId}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.items.every((task: { categoryId: string }) => task.categoryId === categoryId)).toBe(true);
+
+    const search = await request(app)
+      .get("/api/tasks?q=QA%20Lab")
+      .set("Authorization", `Bearer ${token}`);
+    expect(search.status).toBe(200);
+    expect(search.body.items.some((task: { id: string }) => task.id === withCategory.body.id)).toBe(true);
+
+    const blocked = await request(app)
+      .delete(`/api/categories/${categoryId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({});
+    expect(blocked.status).toBe(400);
+    expect(blocked.body.error.message).toContain("tasks");
+
+    const moved = await request(app)
+      .delete(`/api/categories/${categoryId}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ unassign: true });
+    expect(moved.status).toBe(200);
+
+    await request(app).delete(`/api/projects/${otherProject.body.id}`).set("Authorization", `Bearer ${token}`);
+    await request(app).delete(`/api/tasks/${withCategory.body.id}`).set("Authorization", `Bearer ${token}`);
+    await request(app).delete(`/api/tasks/${withoutCategory.body.id}`).set("Authorization", `Bearer ${token}`);
+
+    const stats = await request(app)
+      .get(`/api/dashboard/stats?projectId=${projectId}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(stats.status).toBe(200);
+    expect(typeof stats.body.totalTasks).toBe("number");
+  });
+
   it("cleans up created records", async () => {
     await request(app).delete(`/api/notes/${noteId}`).set("Authorization", `Bearer ${token}`);
     await request(app).delete(`/api/time-blocks/${blockId}`).set("Authorization", `Bearer ${token}`);

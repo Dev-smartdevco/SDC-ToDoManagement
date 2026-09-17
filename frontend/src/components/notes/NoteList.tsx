@@ -1,7 +1,7 @@
 "use client";
 
 import type { Note } from "@/lib/types";
-import { ProjectBadge } from "@/components/ui/ProjectBadge";
+import { ContextBadge } from "@/components/ui/ContextBadge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useI18n } from "@/lib/i18n";
 
@@ -21,7 +21,11 @@ export function NoteList({
           <div className="text-sm font-medium">{note.title}</div>
           <div className="mt-1 line-clamp-2 text-sm text-muted">{note.content || t("untitled")}</div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <ProjectBadge name={note.project?.name} color={note.project?.color} />
+            <ContextBadge
+              project={note.project?.name}
+              category={note.category?.name}
+              color={note.category?.color ?? note.project?.color}
+            />
             {note.tags.map((tag) => (
               <span key={tag} className="text-[11px] uppercase tracking-wide text-muted">
                 {tag}

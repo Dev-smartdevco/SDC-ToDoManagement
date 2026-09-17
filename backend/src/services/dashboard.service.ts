@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma.js";
 import { daysBetween, safePercent, todayIso, weekDates } from "../lib/dates.js";
+import { categoryStats } from "./categories.service.js";
 
 const OPEN_STATUSES = ["INBOX", "TODO", "IN_PROGRESS"] as const;
 
@@ -10,6 +11,7 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
       orderBy: [{ priority: "desc" }, { dueTime: "asc" }, { createdAt: "asc" }],
       include: {
         project: { select: { id: true, name: true, color: true, icon: true } },
+        category: { select: { id: true, name: true, color: true, icon: true, projectId: true } },
         tags: { include: { tag: true } },
       },
     }),
@@ -23,6 +25,7 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
       orderBy: { dueDate: "asc" },
       include: {
         project: { select: { id: true, name: true, color: true, icon: true } },
+        category: { select: { id: true, name: true, color: true, icon: true, projectId: true } },
         tags: { include: { tag: true } },
       },
     }),
@@ -37,6 +40,7 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
       take: 12,
       include: {
         project: { select: { id: true, name: true, color: true, icon: true } },
+        category: { select: { id: true, name: true, color: true, icon: true, projectId: true } },
         tags: { include: { tag: true } },
       },
     }),
@@ -216,4 +220,35 @@ export async function updateReviewNotes(userId: string, date: string, notes: str
     update: { notes },
     create: { userId, date, notes, plannedTasks: 0, completedTasks: 0, focusMinutes: 0 },
   });
+}
+
+export async function getTaskStats(userId: string, query: { projectId?: string; categoryId?: string }) {
+  const today = todayIso();
+  const where = {
+    userId,
+    parentTaskId: null,
+    projectId: query.projectId || undefined,
+    categoryId: query.categoryId || undefined,
+  };
+
+  const [total, completed, open, overdue] = await Promise.all([
+    prisma.task.count({ where }),
+    prisma.task.count({ where: { ...where, status: "DONE" } }),
+    prisma.task.count({ where: { ...where, status: { in: [...OPEN_STATUSES] } } }),
+    prisma.task.count({
+      where: { ...where, status: { in: [...OPEN_STATUSES] }, dueDate: { lt: today, not: null } },
+    }),
+  ]);
+
+  const categories = query.projectId && !query.categoryId
+    ? await categoryStats(userId, query.projectId)
+    : [];
+
+  return {
+    totalTasks: total,
+    completedTasks: completed,
+    openTasks: open,
+    overdueTasks: overdue,
+    categories,
+  };
 }

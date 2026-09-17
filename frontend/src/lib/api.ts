@@ -15,9 +15,13 @@ export function clearToken() {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code?: string;
+  details?: unknown;
+  constructor(status: number, message: string, code?: string, details?: unknown) {
     super(message);
     this.status = status;
+    this.code = code;
+    this.details = details;
   }
 }
 
@@ -43,7 +47,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       clearToken();
       window.location.href = "/login";
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, data?.error?.code, data?.error?.details);
   }
   return data as T;
 }
@@ -57,11 +61,19 @@ export const endpoints = {
   me: () => api<{ id: string; email: string; name: string; currentFocusTaskId: string | null }>("/auth/me"),
   today: (date: string) => api<import("./types").TodayDashboard>(`/dashboard/today?date=${date}`),
   review: (date: string) => api<import("./types").WeekReview>(`/dashboard/review?date=${date}`),
+  stats: (params = "") => api<import("./types").DashboardStats>(`/dashboard/stats${params ? `?${params}` : ""}`),
   projects: () => api<import("./types").Project[]>("/projects"),
   project: (id: string) => api<import("./types").ProjectDetails>(`/projects/${id}`),
   createProject: (body: unknown) => api("/projects", { method: "POST", body: JSON.stringify(body) }),
   updateProject: (id: string, body: unknown) => api(`/projects/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteProject: (id: string) => api(`/projects/${id}`, { method: "DELETE" }),
+  categories: (params = "") => api<import("./types").Category[]>(`/categories${params ? `?${params}` : ""}`),
+  projectCategories: (projectId: string) => api<import("./types").Category[]>(`/projects/${projectId}/categories`),
+  category: (id: string) => api<import("./types").Category>(`/categories/${id}`),
+  createCategory: (body: unknown) => api("/categories", { method: "POST", body: JSON.stringify(body) }),
+  updateCategory: (id: string, body: unknown) => api(`/categories/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteCategory: (id: string, body: unknown = {}) =>
+    api(`/categories/${id}`, { method: "DELETE", body: JSON.stringify(body) }),
   tasks: (params: string) => api<import("./types").TaskListResponse>(`/tasks?${params}`),
   task: (id: string) => api<import("./types").Task>(`/tasks/${id}`),
   createTask: (body: unknown) => api("/tasks", { method: "POST", body: JSON.stringify(body) }),

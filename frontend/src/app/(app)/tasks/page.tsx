@@ -26,8 +26,10 @@ export default function TasksPage() {
   const [view, setView] = useState<(typeof views)[number]>("all");
   const [q, setQ] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [priority, setPriority] = useState("");
   const [status, setStatus] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [editing, setEditing] = useState<Task | Partial<Task> | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<Task | null>(null);
@@ -37,21 +39,29 @@ export default function TasksPage() {
     const p = new URLSearchParams({ view, limit: "50", date: todayIso() });
     if (search) p.set("q", search);
     if (projectId) p.set("projectId", projectId);
+    if (categoryId) p.set("categoryId", categoryId);
     if (priority) p.set("priority", priority);
     if (status) p.set("status", status);
+    if (dueDate) p.set("dueDate", dueDate);
     return p.toString();
-  }, [view, search, projectId, priority, status]);
+  }, [view, search, projectId, categoryId, priority, status, dueDate]);
 
   const tasksScope = useScopedKey(["tasks"]);
   const projectsScope = useScopedKey(["projects"]);
   const tasksQuery = useQuery({ queryKey: useScopedKey(["tasks", params]), queryFn: () => endpoints.tasks(params) });
   const projectsQuery = useQuery({ queryKey: projectsScope, queryFn: endpoints.projects });
+  const categoriesQuery = useQuery({
+    queryKey: useScopedKey(["categories", projectId]),
+    queryFn: () => endpoints.projectCategories(projectId),
+    enabled: Boolean(projectId),
+  });
 
   const save = useMutation({
     mutationFn: (value: TaskFormValue) => {
       const body = {
         title: value.title,
         projectId: value.projectId || null,
+        categoryId: value.categoryId || null,
         priority: value.priority,
         status: value.status,
         dueDate: value.dueDate || null,
@@ -103,11 +113,25 @@ export default function TasksPage() {
       <div className="mb-4 space-y-3">
         <SearchBar value={q} onChange={setQ} placeholder={t("searchTasks")} />
         <FilterBar>
-          <Select value={projectId} onChange={setProjectId}>
+          <Select
+            value={projectId}
+            onChange={(value) => {
+              setProjectId(value);
+              setCategoryId("");
+            }}
+          >
             <option value="">{t("project")}</option>
             {(projectsQuery.data ?? []).map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
+              </option>
+            ))}
+          </Select>
+          <Select value={categoryId} onChange={setCategoryId}>
+            <option value="">{t("category")}</option>
+            {(categoriesQuery.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
             ))}
           </Select>
@@ -126,7 +150,36 @@ export default function TasksPage() {
             <option value="DONE">DONE</option>
             <option value="CANCELLED">CANCELLED</option>
           </Select>
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className="rounded-xl border border-line bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-accent/30"
+          />
         </FilterBar>
+        {projectId && (categoriesQuery.data?.length ?? 0) > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setCategoryId("")}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                !categoryId ? "bg-sidebar text-white" : "bg-white text-muted"
+              }`}
+            >
+              {t("all")}
+            </button>
+            {(categoriesQuery.data ?? []).map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setCategoryId(c.id)}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                  categoryId === c.id ? "bg-sidebar text-white" : "bg-white text-muted"
+                }`}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
       {tasksQuery.isLoading ? <p className="text-sm text-muted">{t("loading")}</p> : null}
       {tasksQuery.isError ? <p className="text-sm text-danger">{t("error")}</p> : null}

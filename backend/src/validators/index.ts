@@ -18,10 +18,28 @@ export const projectSchema = z.object({
   color: z.string().trim().max(20).optional(),
 });
 
+export const categorySchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  projectId: z.string().uuid(),
+  description: z.string().trim().max(2000).optional().nullable(),
+  icon: z.string().trim().max(40).optional(),
+  color: z.string().trim().max(20).optional(),
+  sortOrder: z.number().int().min(0).max(1000).optional(),
+  archived: z.boolean().optional(),
+});
+
+export const categoryUpdateSchema = categorySchema.omit({ projectId: true }).partial();
+
+export const categoryDeleteSchema = z.object({
+  moveToCategoryId: z.string().uuid().optional().nullable(),
+  unassign: z.boolean().optional(),
+});
+
 export const taskSchema = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(8000).optional().nullable(),
   projectId: z.string().uuid().optional().nullable(),
+  categoryId: z.string().uuid().optional().nullable(),
   status: z.enum(["INBOX", "TODO", "IN_PROGRESS", "DONE", "CANCELLED"]).optional(),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional(),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
@@ -42,6 +60,7 @@ export const noteSchema = z.object({
   title: z.string().trim().min(1).max(200),
   content: z.string().max(20000).optional().default(""),
   projectId: z.string().uuid().optional().nullable(),
+  categoryId: z.string().uuid().optional().nullable(),
   taskId: z.string().uuid().optional().nullable(),
   tags: z.array(z.string().trim().min(1).max(40)).optional(),
 });

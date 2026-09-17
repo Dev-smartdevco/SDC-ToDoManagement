@@ -1,6 +1,19 @@
 import { Prisma, type ProjectStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { errors } from "../lib/httpError.js";
+import { categorySelect, projectSelect } from "../lib/category.js";
+import { categoryStats } from "./categories.service.js";
+
+const taskPreviewInclude = {
+  project: { select: projectSelect },
+  category: { select: categorySelect },
+  tags: { include: { tag: true } },
+};
+
+function serializeTask<T extends { tags: { tag: { id: string; name: string } }[] }>(task: T) {
+  const { tags, ...rest } = task;
+  return { ...rest, tags: tags.map((t) => t.tag) };
+}
 
 export async function listProjects(userId: string) {
   const projects = await prisma.project.findMany({
@@ -11,6 +24,7 @@ export async function listProjects(userId: string) {
         select: {
           tasks: true,
           notes: true,
+          categories: true,
         },
       },
     },
@@ -33,6 +47,7 @@ export async function listProjects(userId: string) {
       ...project,
       taskCount: project._count.tasks,
       noteCount: project._count.notes,
+      categoryCount: project._count.categories,
       openTasks: open,
       completedTasks: done,
       progress: total === 0 ? 0 : Math.round((done / total) * 100),
@@ -44,17 +59,17 @@ export async function getProject(userId: string, id: string) {
   const project = await prisma.project.findFirst({ where: { id, userId } });
   if (!project) throw errors.notFound("Project");
 
-  const [openTasks, completedTasks, overdueTasks, upcomingTasks, notes] = await Promise.all([
+  const [openTasks, completedTasks, overdueTasks, upcomingTasks, notes, categories] = await Promise.all([
     prisma.task.findMany({
       where: { userId, projectId: id, status: { in: ["INBOX", "TODO", "IN_PROGRESS"] } },
       orderBy: [{ priority: "desc" }, { dueDate: "asc" }],
-      include: { tags: { include: { tag: true } } },
+      include: taskPreviewInclude,
     }),
     prisma.task.findMany({
       where: { userId, projectId: id, status: "DONE" },
       orderBy: { completedAt: "desc" },
       take: 30,
-      include: { tags: { include: { tag: true } } },
+      include: taskPreviewInclude,
     }),
     prisma.task.findMany({
       where: {
@@ -64,7 +79,7 @@ export async function getProject(userId: string, id: string) {
         dueDate: { lt: new Date().toISOString().slice(0, 10) },
       },
       orderBy: { dueDate: "asc" },
-      include: { tags: { include: { tag: true } } },
+      include: taskPreviewInclude,
     }),
     prisma.task.findMany({
       where: {
@@ -75,12 +90,14 @@ export async function getProject(userId: string, id: string) {
       },
       orderBy: { dueDate: "asc" },
       take: 20,
-      include: { tags: { include: { tag: true } } },
+      include: taskPreviewInclude,
     }),
     prisma.note.findMany({
       where: { userId, projectId: id },
+      include: { category: { select: categorySelect } },
       orderBy: { updatedAt: "desc" },
     }),
+    categoryStats(userId, id),
   ]);
 
   const total = openTasks.length + completedTasks.length;
@@ -89,11 +106,12 @@ export async function getProject(userId: string, id: string) {
   return {
     ...project,
     progress,
-    openTasks,
-    completedTasks,
-    overdueTasks,
-    upcomingTasks,
+    openTasks: openTasks.map(serializeTask),
+    completedTasks: completedTasks.map(serializeTask),
+    overdueTasks: overdueTasks.map(serializeTask),
+    upcomingTasks: upcomingTasks.map(serializeTask),
     notes,
+    categories,
   };
 }
 

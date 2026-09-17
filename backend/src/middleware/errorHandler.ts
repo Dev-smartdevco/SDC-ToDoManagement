@@ -5,7 +5,7 @@ import { HttpError } from "../lib/httpError.js";
 export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
   if (err instanceof HttpError) {
     return res.status(err.status).json({
-      error: { code: err.code, message: err.message },
+      error: { code: err.code, message: err.message, details: err.details },
     });
   }
 

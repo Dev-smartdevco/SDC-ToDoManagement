@@ -9,6 +9,7 @@ import { notesRouter } from "./routes/notes.js";
 import { timeBlocksRouter } from "./routes/timeBlocks.js";
 import { focusRouter } from "./routes/focus.js";
 import { dashboardRouter } from "./routes/dashboard.js";
+import { categoriesRouter } from "./routes/categories.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
 const DEFAULT_ORIGINS = [
@@ -37,6 +38,7 @@ export function createApp() {
 
   app.use("/api/auth", authRouter);
   app.use("/api/projects", projectsRouter);
+  app.use("/api/categories", categoriesRouter);
   app.use("/api/tasks", tasksRouter);
   app.use("/api/notes", notesRouter);
   app.use("/api/time-blocks", timeBlocksRouter);

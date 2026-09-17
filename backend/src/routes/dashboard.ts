@@ -26,6 +26,17 @@ dashboardRouter.get(
   }),
 );
 
+dashboardRouter.get(
+  "/stats",
+  asyncHandler(async (req, res) => {
+    const data = await dashboardService.getTaskStats((req as AuthRequest).userId, {
+      projectId: typeof req.query.projectId === "string" ? req.query.projectId : undefined,
+      categoryId: typeof req.query.categoryId === "string" ? req.query.categoryId : undefined,
+    });
+    res.json(data);
+  }),
+);
+
 dashboardRouter.put(
   "/review/:date",
   asyncHandler(async (req, res) => {

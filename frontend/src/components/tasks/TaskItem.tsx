@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Check, MoreHorizontal } from "lucide-react";
 import type { Task } from "@/lib/types";
-import { ProjectBadge } from "@/components/ui/ProjectBadge";
+import { ContextBadge } from "@/components/ui/ContextBadge";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 import { useI18n } from "@/lib/i18n";
 
@@ -42,7 +42,11 @@ export function TaskItem({
       <button onClick={() => onEdit(task)} className="min-w-0 flex-1 text-start">
         <div className={`text-sm ${done ? "text-muted line-through" : "text-ink"}`}>{task.title}</div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <ProjectBadge name={task.project?.name} color={task.project?.color} />
+          <ContextBadge
+            project={task.project?.name}
+            category={task.category?.name}
+            color={task.category?.color ?? task.project?.color}
+          />
           <PriorityBadge priority={task.priority} />
           {task.dueTime ? <span className="text-[11px] text-muted">{task.dueTime}</span> : null}
           {task.estimatedMinutes ? (

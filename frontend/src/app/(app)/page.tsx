@@ -76,6 +76,7 @@ export default function TodayPage() {
       const body = {
         title: value.title,
         projectId: value.projectId || null,
+        categoryId: value.categoryId || null,
         priority: value.priority,
         status: value.status,
         dueDate: value.dueDate || null,

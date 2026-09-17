@@ -29,6 +29,8 @@ export function QuickAdd({
   const { t } = useI18n();
   const toast = useToast();
   const [kind, setKind] = useState<Kind>(defaultKind);
+  const [title, setTitle] = useState("");
+  const [expanded, setExpanded] = useState(false);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteContent, setNoteContent] = useState("");
   const [projectName, setProjectName] = useState("");
@@ -42,7 +44,11 @@ export function QuickAdd({
   });
 
   useEffect(() => {
-    if (open) setKind(defaultKind);
+    if (open) {
+      setKind(defaultKind);
+      setExpanded(false);
+      setTitle("");
+    }
   }, [open, defaultKind]);
 
   const projects = (projectsQuery.data ?? []) as Project[];
@@ -56,6 +62,7 @@ export function QuickAdd({
     await endpoints.createTask({
       title: value.title,
       projectId: value.projectId || null,
+      categoryId: value.categoryId || null,
       priority: value.priority,
       status: value.dueDate ? value.status : "INBOX",
       dueDate: value.dueDate || null,
@@ -93,7 +100,41 @@ export function QuickAdd({
         ))}
       </div>
 
-      {kind === "task" ? (
+      {kind === "task" && !expanded ? (
+        <form
+          className="space-y-3"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!title.trim()) return;
+            await endpoints.capture(title.trim());
+            toast.push(t("inboxHint"));
+            setTitle("");
+            onCreated?.();
+            onClose();
+          }}
+        >
+          <input
+            autoFocus
+            className="w-full rounded-xl border border-line px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-accent/30"
+            placeholder={t("typeAnything")}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <div className="flex items-center justify-between">
+            <button type="button" onClick={() => setExpanded(true)} className="text-sm text-muted hover:text-ink">
+              {t("moreDetails")}
+            </button>
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className="rounded-xl px-4 py-2 text-sm text-muted">
+                {t("cancel")}
+              </button>
+              <button className="rounded-xl bg-sidebar px-4 py-2 text-sm font-medium text-white">{t("save")}</button>
+            </div>
+          </div>
+        </form>
+      ) : null}
+
+      {kind === "task" && expanded ? (
         <TaskForm autoFocus projects={projects} onCancel={onClose} onSubmit={saveTask} />
       ) : null}
 

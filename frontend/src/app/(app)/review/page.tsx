@@ -1,10 +1,13 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ar, enUS } from "date-fns/locale";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProgressBar } from "@/components/ui/ProgressBar";
+import { FilterBar, Select } from "@/components/ui/FilterBar";
+import { CategoryIcon } from "@/components/ui/CategoryIcon";
 import { endpoints } from "@/lib/api";
 import { formatMinutes, todayIso } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
@@ -13,8 +16,27 @@ import { useScopedKey } from "@/lib/auth";
 export default function ReviewPage() {
   const { t, locale } = useI18n();
   const date = todayIso();
+  const [projectId, setProjectId] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const query = useQuery({ queryKey: useScopedKey(["review", date]), queryFn: () => endpoints.review(date) });
+  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects });
+  const statsParams = useMemo(() => {
+    const p = new URLSearchParams();
+    if (projectId) p.set("projectId", projectId);
+    if (categoryId) p.set("categoryId", categoryId);
+    return p.toString();
+  }, [projectId, categoryId]);
+  const statsQuery = useQuery({
+    queryKey: useScopedKey(["stats", statsParams]),
+    queryFn: () => endpoints.stats(statsParams),
+  });
+  const categoriesQuery = useQuery({
+    queryKey: useScopedKey(["categories", projectId]),
+    queryFn: () => endpoints.projectCategories(projectId),
+    enabled: Boolean(projectId),
+  });
   const data = query.data;
+  const stats = statsQuery.data;
 
   if (query.isLoading) return <p className="text-sm text-muted">{t("loading")}</p>;
   if (query.isError || !data) return <p className="text-sm text-danger">{t("error")}</p>;
@@ -39,6 +61,85 @@ export default function ReviewPage() {
         ))}
       </section>
       <ProgressBar value={completion} label={t("today")} />
+
+      <section className="space-y-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">{t("overview")}</h2>
+        <FilterBar>
+          <Select
+            value={projectId}
+            onChange={(value) => {
+              setProjectId(value);
+              setCategoryId("");
+            }}
+          >
+            <option value="">{t("allProjects")}</option>
+            {(projectsQuery.data ?? []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+          <Select value={categoryId} onChange={setCategoryId}>
+            <option value="">{t("category")}</option>
+            {(categoriesQuery.data ?? []).map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+        </FilterBar>
+        {projectId && (categoriesQuery.data?.length ?? 0) > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setCategoryId("")}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                !categoryId ? "bg-sidebar text-white" : "bg-white text-muted"
+              }`}
+            >
+              {t("all")}
+            </button>
+            {(categoriesQuery.data ?? []).map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setCategoryId(c.id)}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                  categoryId === c.id ? "bg-sidebar text-white" : "bg-white text-muted"
+                }`}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: t("totalTasks"), value: stats?.totalTasks ?? 0 },
+            { label: t("completedTasks"), value: stats?.completedTasks ?? 0 },
+            { label: t("openTasks"), value: stats?.openTasks ?? 0 },
+            { label: t("overdue"), value: stats?.overdueTasks ?? 0 },
+          ].map((item) => (
+            <div key={item.label} className="rounded-2xl border border-line bg-white p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{item.label}</div>
+              <div className="mt-2 text-2xl font-semibold">{item.value}</div>
+            </div>
+          ))}
+        </div>
+        {stats?.categories?.length ? (
+          <div className="rounded-2xl border border-line bg-white">
+            {stats.categories.map((category) => (
+              <div key={category.id} className="flex items-center justify-between border-b border-line px-4 py-3 last:border-b-0">
+                <div className="flex items-center gap-2">
+                  <CategoryIcon name={category.icon} color={category.color} size={14} />
+                  <span className="text-sm font-medium">{category.name}</span>
+                </div>
+                <span className="text-sm text-muted">
+                  {category.taskCount ?? 0} {t("tasks")}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
 
       <section>
         <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">{t("weekReview")}</h2>

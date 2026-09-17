@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { Priority, Project, Task, TaskStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
+import { endpoints } from "@/lib/api";
+import { useScopedKey } from "@/lib/auth";
 
 const field =
   "w-full rounded-xl border border-line bg-white px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-accent/30";
@@ -10,6 +13,7 @@ const field =
 export type TaskFormValue = {
   title: string;
   projectId: string;
+  categoryId: string;
   priority: Priority;
   status: TaskStatus;
   dueDate: string;
@@ -36,6 +40,7 @@ export function TaskForm({
   const [value, setValue] = useState<TaskFormValue>({
     title: task?.title ?? "",
     projectId: task?.projectId ?? "",
+    categoryId: task?.categoryId ?? "",
     priority: task?.priority ?? "MEDIUM",
     status: task?.status ?? "TODO",
     dueDate: task?.dueDate ?? "",
@@ -49,6 +54,7 @@ export function TaskForm({
     setValue({
       title: task?.title ?? "",
       projectId: task?.projectId ?? "",
+      categoryId: task?.categoryId ?? "",
       priority: task?.priority ?? "MEDIUM",
       status: task?.status ?? "TODO",
       dueDate: task?.dueDate ?? "",
@@ -58,6 +64,25 @@ export function TaskForm({
       tags: task?.tags?.map((tag) => tag.name).join(", ") ?? "",
     });
   }, [task]);
+
+  const categoriesQuery = useQuery({
+    queryKey: useScopedKey(["categories", value.projectId]),
+    queryFn: () => endpoints.projectCategories(value.projectId),
+    enabled: Boolean(value.projectId),
+  });
+  const categories = categoriesQuery.data ?? [];
+
+  useEffect(() => {
+    if (!value.categoryId) return;
+    if (!value.projectId) {
+      setValue((v) => ({ ...v, categoryId: "" }));
+      return;
+    }
+    const items = categoriesQuery.data;
+    if (items && !items.some((c) => c.id === value.categoryId)) {
+      setValue((v) => ({ ...v, categoryId: "" }));
+    }
+  }, [value.projectId, value.categoryId, categoriesQuery.data]);
 
   return (
     <form
@@ -76,7 +101,11 @@ export function TaskForm({
         onChange={(e) => setValue((v) => ({ ...v, title: e.target.value }))}
       />
       <div className="grid grid-cols-2 gap-3">
-        <select className={field} value={value.projectId} onChange={(e) => setValue((v) => ({ ...v, projectId: e.target.value }))}>
+        <select
+          className={field}
+          value={value.projectId}
+          onChange={(e) => setValue((v) => ({ ...v, projectId: e.target.value, categoryId: "" }))}
+        >
           <option value="">{t("project")}</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
@@ -84,18 +113,27 @@ export function TaskForm({
             </option>
           ))}
         </select>
+        <select
+          className={field}
+          value={value.categoryId}
+          disabled={!value.projectId}
+          onChange={(e) => setValue((v) => ({ ...v, categoryId: e.target.value }))}
+        >
+          <option value="">{t("category")}</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
         <select className={field} value={value.priority} onChange={(e) => setValue((v) => ({ ...v, priority: e.target.value as Priority }))}>
           <option value="LOW">LOW</option>
           <option value="MEDIUM">MEDIUM</option>
           <option value="HIGH">HIGH</option>
           <option value="URGENT">URGENT</option>
         </select>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <input type="date" className={field} value={value.dueDate} onChange={(e) => setValue((v) => ({ ...v, dueDate: e.target.value }))} />
-        <input type="time" className={field} value={value.dueTime} onChange={(e) => setValue((v) => ({ ...v, dueTime: e.target.value }))} />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
         <select className={field} value={value.status} onChange={(e) => setValue((v) => ({ ...v, status: e.target.value as TaskStatus }))}>
           <option value="INBOX">INBOX</option>
           <option value="TODO">TODO</option>
@@ -103,13 +141,17 @@ export function TaskForm({
           <option value="DONE">DONE</option>
           <option value="CANCELLED">CANCELLED</option>
         </select>
-        <input
-          className={field}
-          placeholder={`${t("estimatedDuration")} (${t("minutes")})`}
-          value={value.estimatedMinutes}
-          onChange={(e) => setValue((v) => ({ ...v, estimatedMinutes: e.target.value }))}
-        />
       </div>
+      <div className="grid grid-cols-2 gap-3">
+        <input type="date" className={field} value={value.dueDate} onChange={(e) => setValue((v) => ({ ...v, dueDate: e.target.value }))} />
+        <input type="time" className={field} value={value.dueTime} onChange={(e) => setValue((v) => ({ ...v, dueTime: e.target.value }))} />
+      </div>
+      <input
+        className={field}
+        placeholder={`${t("estimatedDuration")} (${t("minutes")})`}
+        value={value.estimatedMinutes}
+        onChange={(e) => setValue((v) => ({ ...v, estimatedMinutes: e.target.value }))}
+      />
       <input
         className={field}
         placeholder={t("tags")}

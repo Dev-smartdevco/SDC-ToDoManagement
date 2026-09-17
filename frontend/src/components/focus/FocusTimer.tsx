@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { FocusSession, Task } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
-import { ProjectBadge } from "@/components/ui/ProjectBadge";
+import { ContextBadge } from "@/components/ui/ContextBadge";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
 
 function formatClock(totalSeconds: number) {
@@ -62,7 +62,11 @@ export function FocusTimer({
         <>
           <h2 className="mt-3 text-xl font-semibold leading-snug">{task.title}</h2>
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <ProjectBadge name={task.project?.name} color={task.project?.color} />
+          <ContextBadge
+            project={task.project?.name}
+            category={task.category?.name}
+            color={task.category?.color ?? task.project?.color}
+          />
             <PriorityBadge priority={task.priority} />
             {task.estimatedMinutes ? (
               <span className="text-sm text-muted">

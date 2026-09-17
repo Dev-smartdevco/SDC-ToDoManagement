@@ -18,10 +18,12 @@ tasksRouter.get(
     const data = await tasksService.listTasks((req as AuthRequest).userId, {
       view,
       projectId: typeof req.query.projectId === "string" ? req.query.projectId : undefined,
+      categoryId: typeof req.query.categoryId === "string" ? req.query.categoryId : undefined,
       priority: req.query.priority as Priority | undefined,
       status: req.query.status as TaskStatus | undefined,
       q: typeof req.query.q === "string" ? req.query.q : undefined,
       date: typeof req.query.date === "string" ? req.query.date : undefined,
+      dueDate: typeof req.query.dueDate === "string" ? req.query.dueDate : undefined,
       page: paging.page,
       limit: paging.limit,
     });
