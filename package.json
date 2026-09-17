@@ -15,7 +15,8 @@
     "test": "npm run test -w backend",
     "db:migrate": "npm run prisma:migrate -w backend",
     "db:seed": "npm run prisma:seed -w backend",
-    "db:reset": "npm run prisma:reset -w backend"
+    "db:reset": "npm run prisma:reset -w backend",
+    "deploy:web": "npm run build -w frontend && npx firebase-tools deploy --only hosting --project sdc-todomanagement"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

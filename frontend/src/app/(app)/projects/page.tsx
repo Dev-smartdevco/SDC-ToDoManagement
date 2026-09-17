@@ -37,7 +37,7 @@ export default function ProjectsPage() {
       {query.data?.length === 0 ? <EmptyState title={t("noProjects")} /> : null}
       <div className="grid gap-3 md:grid-cols-2">
         {(query.data ?? []).map((project) => (
-          <Link key={project.id} href={`/projects/${project.id}`} className="rounded-2xl border border-line bg-white p-4 hover:border-accent/40">
+          <Link key={project.id} href={`/projects/detail?id=${project.id}`} className="rounded-2xl border border-line bg-white p-4 hover:border-accent/40">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 rounded-full" style={{ background: project.color }} />

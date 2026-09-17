@@ -62,6 +62,25 @@ Shortcuts are ignored while typing in inputs.
 
 English is the default. Switch to Arabic from the sidebar. The document direction becomes `rtl`.
 
+## Production
+
+- API: `https://sdc-to-do-management-three.vercel.app`
+- Web: Firebase Hosting project `sdc-todomanagement`
+
+Build and deploy the frontend:
+
+```bash
+npm run deploy:web
+```
+
+On Vercel, set `CLIENT_ORIGIN` to:
+
+```
+https://sdc-todomanagement.web.app,https://sdc-todomanagement.firebaseapp.com,http://localhost:3000
+```
+
+Then Redeploy the API so CORS allows the Firebase domain.
+
 ## Vercel (API)
 
 The backend is a serverless Express app. After deploy, `GET /api/health` should return:

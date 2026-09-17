@@ -39,7 +39,7 @@ export default function NotesPage() {
           <button
             onClick={async () => {
               const note = await endpoints.createNote({ title: t("untitled"), content: "" }) as { id: string };
-              router.push(`/notes/${note.id}`);
+              router.push(`/notes/detail?id=${note.id}`);
             }}
             className="rounded-xl bg-sidebar px-4 py-2 text-sm font-medium text-white"
           >
@@ -70,7 +70,7 @@ export default function NotesPage() {
       </div>
       {notesQuery.isLoading ? <p className="text-sm text-muted">{t("loading")}</p> : null}
       {notesQuery.isError ? <p className="text-sm text-danger">{t("error")}</p> : null}
-      {notesQuery.data ? <NoteList notes={notesQuery.data} onOpen={(note) => router.push(`/notes/${note.id}`)} /> : null}
+      {notesQuery.data ? <NoteList notes={notesQuery.data} onOpen={(note) => router.push(`/notes/detail?id=${note.id}`)} /> : null}
     </div>
   );
 }

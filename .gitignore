@@ -13,3 +13,5 @@ frontend/.turbo
 *.tsbuildinfo
 .vscode
 .idea
+.firebase
+frontend/out

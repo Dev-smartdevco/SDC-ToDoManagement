@@ -11,13 +11,19 @@ import { focusRouter } from "./routes/focus.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
+const DEFAULT_ORIGINS = [
+  "http://localhost:3000",
+  "https://sdc-todomanagement.web.app",
+  "https://sdc-todomanagement.firebaseapp.com",
+];
+
 function corsOrigin() {
-  const allowed = env.clientOrigin
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const allowed = [
+    ...DEFAULT_ORIGINS,
+    ...env.clientOrigin.split(",").map((value) => value.trim()).filter(Boolean),
+  ];
   if (allowed.includes("*")) return true;
-  return allowed.length === 1 ? allowed[0] : allowed;
+  return [...new Set(allowed)];
 }
 
 export function createApp() {

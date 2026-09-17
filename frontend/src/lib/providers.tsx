@@ -5,6 +5,7 @@ import { useState } from "react";
 import { AuthProvider } from "./auth";
 import { I18nProvider } from "./i18n";
 import { ToastProvider } from "./toast";
+import { FirebaseAnalytics } from "./firebase";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -20,7 +21,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={client}>
       <I18nProvider>
         <AuthProvider>
-          <ToastProvider>{children}</ToastProvider>
+          <ToastProvider>
+            <FirebaseAnalytics />
+            {children}
+          </ToastProvider>
         </AuthProvider>
       </I18nProvider>
     </QueryClientProvider>
