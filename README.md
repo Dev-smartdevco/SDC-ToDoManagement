@@ -61,3 +61,30 @@ Shortcuts are ignored while typing in inputs.
 ## Language
 
 English is the default. Switch to Arabic from the sidebar. The document direction becomes `rtl`.
+
+## Vercel (API)
+
+The backend is a serverless Express app. After deploy, `GET /api/health` should return:
+
+```json
+{ "ok": true, "name": "MY OS API" }
+```
+
+Set these environment variables in the Vercel project:
+
+```
+DATABASE_URL
+DIRECT_URL
+JWT_SECRET
+CLIENT_ORIGIN
+ADMIN_EMAIL
+ADMIN_PASSWORD
+```
+
+`CLIENT_ORIGIN` can be a comma-separated list, for example:
+
+```
+http://localhost:3000,https://your-frontend.vercel.app
+```
+
+If this Vercel project is the API only, keep the Root Directory as the repository root (not `frontend`).
