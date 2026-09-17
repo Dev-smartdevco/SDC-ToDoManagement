@@ -1,20 +1,13 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, CalendarDays, CheckSquare, FolderKanban, Plus, Sparkles } from "lucide-react";
+import { LogOut, Plus } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { isNavActive, navItems } from "@/lib/nav";
+import { BrandLogo } from "./BrandLogo";
 import clsx from "clsx";
-
-const items = [
-  { href: "/", key: "today" as const, icon: CalendarDays },
-  { href: "/tasks", key: "tasks" as const, icon: CheckSquare },
-  { href: "/projects", key: "projects" as const, icon: FolderKanban },
-  { href: "/notes", key: "notes" as const, icon: BookOpen },
-  { href: "/review", key: "review" as const, icon: Sparkles },
-];
 
 export function Sidebar({ onQuickAdd }: { onQuickAdd: () => void }) {
   const pathname = usePathname();
@@ -22,18 +15,14 @@ export function Sidebar({ onQuickAdd }: { onQuickAdd: () => void }) {
   const { logout, user } = useAuth();
 
   return (
-    <aside className="hidden h-screen w-[260px] shrink-0 flex-col bg-sidebar text-white md:flex lg:w-[280px]">
-      <div className="flex items-center gap-3 px-5 pb-6 pt-6">
-        <Image src="/brand/logo.svg" alt="SmartDevCo" width={42} height={42} />
-        <div>
-          <div className="text-lg font-semibold tracking-wide">{t("appName")}</div>
-          <div className="text-[11px] uppercase tracking-[0.16em] text-white/55">{t("subtitle")}</div>
-        </div>
+    <aside className="fixed inset-y-0 start-0 z-40 hidden w-[280px] flex-col bg-sidebar text-white lg:w-[300px] md:flex">
+      <div className="border-b border-white/10 px-5 py-6">
+        <BrandLogo size="md" showSubtitle />
       </div>
 
-      <nav className="flex-1 space-y-1 px-3">
-        {items.map((item) => {
-          const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
+        {navItems.map((item) => {
+          const active = isNavActive(pathname, item.href);
           const Icon = item.icon;
           return (
             <Link
@@ -51,7 +40,7 @@ export function Sidebar({ onQuickAdd }: { onQuickAdd: () => void }) {
         })}
       </nav>
 
-      <div className="space-y-3 px-4 pb-5">
+      <div className="mt-auto space-y-3 border-t border-white/10 px-4 py-4">
         <button
           onClick={onQuickAdd}
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-3 py-2.5 text-sm font-semibold text-white"
@@ -73,9 +62,17 @@ export function Sidebar({ onQuickAdd }: { onQuickAdd: () => void }) {
             AR
           </button>
         </div>
-        <button onClick={logout} className="w-full text-start text-xs text-white/45 hover:text-white">
-          {user?.name} · {t("logout")}
-        </button>
+        <div className="rounded-xl bg-white/5 px-3 py-3">
+          <div className="truncate text-sm font-medium text-white">{user?.name}</div>
+          <div className="truncate text-[11px] text-white/45">{user?.email}</div>
+          <button
+            onClick={logout}
+            className="mt-3 flex items-center gap-2 text-xs text-white/55 hover:text-white"
+          >
+            <LogOut size={14} />
+            {t("logout")}
+          </button>
+        </div>
       </div>
     </aside>
   );

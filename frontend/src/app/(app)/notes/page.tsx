@@ -10,6 +10,7 @@ import { NoteList } from "@/components/notes/NoteList";
 import { endpoints } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useScopedKey } from "@/lib/auth";
 
 export default function NotesPage() {
   const { t } = useI18n();
@@ -27,8 +28,8 @@ export default function NotesPage() {
     return p.toString();
   }, [search, projectId, tag]);
 
-  const notesQuery = useQuery({ queryKey: ["notes", params], queryFn: () => endpoints.notes(params) });
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: endpoints.projects });
+  const notesQuery = useQuery({ queryKey: useScopedKey(["notes", params]), queryFn: () => endpoints.notes(params) });
+  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects });
   const tags = Array.from(new Set((notesQuery.data ?? []).flatMap((n) => n.tags)));
 
   return (

@@ -10,6 +10,7 @@ import { useI18n } from "@/lib/i18n";
 import { todayIso } from "@/lib/format";
 import type { Project, Task } from "@/lib/types";
 import { useToast } from "@/lib/toast";
+import { useScopedKey } from "@/lib/auth";
 
 const kinds = ["task", "note", "project", "timeBlock", "idea"] as const;
 type Kind = (typeof kinds)[number];
@@ -33,9 +34,9 @@ export function QuickAdd({
   const [projectName, setProjectName] = useState("");
   const [projectColor, setProjectColor] = useState("#3A96D4");
 
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: endpoints.projects, enabled: open });
+  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects, enabled: open });
   const tasksQuery = useQuery({
-    queryKey: ["tasks", "quick"],
+    queryKey: useScopedKey(["tasks", "quick"]),
     queryFn: () => endpoints.tasks("view=all&limit=100"),
     enabled: open,
   });

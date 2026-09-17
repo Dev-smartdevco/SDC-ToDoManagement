@@ -14,6 +14,7 @@ import { endpoints } from "@/lib/api";
 import { formatLongDate, greetingKey, isTypingTarget, progressBar, todayIso } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/lib/toast";
+import { useScopedKey } from "@/lib/auth";
 import type { Task } from "@/lib/types";
 
 export default function TodayPage() {
@@ -26,23 +27,29 @@ export default function TodayPage() {
   const [deleting, setDeleting] = useState<Task | null>(null);
   const [blockOpen, setBlockOpen] = useState(false);
 
-  const todayQuery = useQuery({ queryKey: ["today", date], queryFn: () => endpoints.today(date) });
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: endpoints.projects });
+  const todayKey = useScopedKey(["today", date]);
+  const projectsKey = useScopedKey(["projects"]);
+  const tasksKey = useScopedKey(["tasks"]);
+  const reviewKey = useScopedKey(["review"]);
+
+  const todayQuery = useQuery({ queryKey: todayKey, queryFn: () => endpoints.today(date) });
+  const projectsQuery = useQuery({ queryKey: projectsKey, queryFn: endpoints.projects });
   const data = todayQuery.data;
   const greeting = t(greetingKey());
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["today"] });
-    queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    queryClient.invalidateQueries({ queryKey: ["review"] });
+    queryClient.invalidateQueries({ queryKey: todayKey });
+    queryClient.invalidateQueries({ queryKey: tasksKey });
+    queryClient.invalidateQueries({ queryKey: reviewKey });
+    queryClient.invalidateQueries({ queryKey: projectsKey });
   };
 
   const toggle = useMutation({
     mutationFn: (task: Task) => endpoints.patchStatus(task.id, task.status === "DONE" ? "TODO" : "DONE"),
     onMutate: async (task) => {
-      await queryClient.cancelQueries({ queryKey: ["today", date] });
-      const previous = queryClient.getQueryData(["today", date]);
-      queryClient.setQueryData(["today", date], (old: typeof data) => {
+      await queryClient.cancelQueries({ queryKey: todayKey });
+      const previous = queryClient.getQueryData(todayKey);
+      queryClient.setQueryData(todayKey, (old: typeof data) => {
         if (!old) return old;
         const flip = (list: Task[]) =>
           list.map((item) => (item.id === task.id ? { ...item, status: item.status === "DONE" ? "TODO" : "DONE" } : item));
@@ -58,7 +65,7 @@ export default function TodayPage() {
       return { previous };
     },
     onError: (_err, _task, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(["today", date], ctx.previous);
+      if (ctx?.previous) queryClient.setQueryData(todayKey, ctx.previous);
       toast.push(t("error"), "error");
     },
     onSettled: invalidate,

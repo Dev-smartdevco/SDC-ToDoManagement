@@ -7,6 +7,7 @@ import { NoteEditor } from "@/components/notes/NoteEditor";
 import { endpoints } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/lib/toast";
+import { useScopedKey } from "@/lib/auth";
 
 function NoteDetailsInner() {
   const searchParams = useSearchParams();
@@ -15,13 +16,15 @@ function NoteDetailsInner() {
   const { t } = useI18n();
   const toast = useToast();
   const queryClient = useQueryClient();
+  const noteKey = useScopedKey(["note", id]);
+  const notesKey = useScopedKey(["notes"]);
   const noteQuery = useQuery({
-    queryKey: ["note", id],
+    queryKey: noteKey,
     queryFn: () => endpoints.note(id),
     enabled: Boolean(id),
   });
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: endpoints.projects });
-  const tasksQuery = useQuery({ queryKey: ["tasks", "notes"], queryFn: () => endpoints.tasks("limit=100") });
+  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects });
+  const tasksQuery = useQuery({ queryKey: useScopedKey(["tasks", "notes"]), queryFn: () => endpoints.tasks("limit=100") });
 
   if (!id) return <p className="text-sm text-danger">{t("error")}</p>;
   if (noteQuery.isLoading) return <p className="text-sm text-muted">{t("loading")}</p>;
@@ -34,8 +37,8 @@ function NoteDetailsInner() {
       tasks={tasksQuery.data?.items ?? []}
       onSave={async (value) => {
         await endpoints.updateNote(id, value);
-        queryClient.invalidateQueries({ queryKey: ["note", id] });
-        queryClient.invalidateQueries({ queryKey: ["notes"] });
+        queryClient.invalidateQueries({ queryKey: noteKey });
+        queryClient.invalidateQueries({ queryKey: notesKey });
         toast.push(t("saved"));
       }}
       onDelete={async () => {

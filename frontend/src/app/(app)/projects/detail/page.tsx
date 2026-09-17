@@ -10,6 +10,7 @@ import { NoteList } from "@/components/notes/NoteList";
 import { endpoints } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/lib/toast";
+import { useScopedKey } from "@/lib/auth";
 
 function ProjectDetailsInner() {
   const searchParams = useSearchParams();
@@ -18,8 +19,9 @@ function ProjectDetailsInner() {
   const { t } = useI18n();
   const toast = useToast();
   const queryClient = useQueryClient();
+  const projectKey = useScopedKey(["project", id]);
   const query = useQuery({
-    queryKey: ["project", id],
+    queryKey: projectKey,
     queryFn: () => endpoints.project(id),
     enabled: Boolean(id),
   });
@@ -61,12 +63,12 @@ function ProjectDetailsInner() {
             tasks={project.overdueTasks}
             onToggle={async (task) => {
               await endpoints.patchStatus(task.id, task.status === "DONE" ? "TODO" : "DONE");
-              queryClient.invalidateQueries({ queryKey: ["project", id] });
+              queryClient.invalidateQueries({ queryKey: projectKey });
             }}
             onEdit={() => router.push("/tasks")}
             onDelete={async (task) => {
               await endpoints.deleteTask(task.id);
-              queryClient.invalidateQueries({ queryKey: ["project", id] });
+              queryClient.invalidateQueries({ queryKey: projectKey });
             }}
           />
         </div>
@@ -78,12 +80,12 @@ function ProjectDetailsInner() {
             tasks={project.openTasks}
             onToggle={async (task) => {
               await endpoints.patchStatus(task.id, task.status === "DONE" ? "TODO" : "DONE");
-              queryClient.invalidateQueries({ queryKey: ["project", id] });
+              queryClient.invalidateQueries({ queryKey: projectKey });
             }}
             onEdit={() => router.push("/tasks")}
             onDelete={async (task) => {
               await endpoints.deleteTask(task.id);
-              queryClient.invalidateQueries({ queryKey: ["project", id] });
+              queryClient.invalidateQueries({ queryKey: projectKey });
             }}
           />
         </div>
@@ -95,12 +97,12 @@ function ProjectDetailsInner() {
             tasks={project.upcomingTasks}
             onToggle={async (task) => {
               await endpoints.patchStatus(task.id, task.status === "DONE" ? "TODO" : "DONE");
-              queryClient.invalidateQueries({ queryKey: ["project", id] });
+              queryClient.invalidateQueries({ queryKey: projectKey });
             }}
             onEdit={() => router.push("/tasks")}
             onDelete={async (task) => {
               await endpoints.deleteTask(task.id);
-              queryClient.invalidateQueries({ queryKey: ["project", id] });
+              queryClient.invalidateQueries({ queryKey: projectKey });
             }}
           />
         </div>
@@ -112,12 +114,12 @@ function ProjectDetailsInner() {
             tasks={project.completedTasks}
             onToggle={async (task) => {
               await endpoints.patchStatus(task.id, "TODO");
-              queryClient.invalidateQueries({ queryKey: ["project", id] });
+              queryClient.invalidateQueries({ queryKey: projectKey });
             }}
             onEdit={() => router.push("/tasks")}
             onDelete={async (task) => {
               await endpoints.deleteTask(task.id);
-              queryClient.invalidateQueries({ queryKey: ["project", id] });
+              queryClient.invalidateQueries({ queryKey: projectKey });
             }}
           />
         </div>

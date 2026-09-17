@@ -11,16 +11,18 @@ import { endpoints } from "@/lib/api";
 import { PROJECT_COLORS } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/lib/toast";
+import { useScopedKey } from "@/lib/auth";
 
 export default function ProjectsPage() {
   const { t } = useI18n();
   const toast = useToast();
   const queryClient = useQueryClient();
+  const projectsKey = useScopedKey(["projects"]);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [color, setColor] = useState(PROJECT_COLORS[0]);
-  const query = useQuery({ queryKey: ["projects"], queryFn: endpoints.projects });
+  const query = useQuery({ queryKey: projectsKey, queryFn: endpoints.projects });
 
   return (
     <div>
@@ -64,7 +66,7 @@ export default function ProjectsPage() {
             setOpen(false);
             setName("");
             setDescription("");
-            queryClient.invalidateQueries({ queryKey: ["projects"] });
+            queryClient.invalidateQueries({ queryKey: projectsKey });
             toast.push(t("created"));
           }}
         >

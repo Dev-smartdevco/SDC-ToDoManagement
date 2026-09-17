@@ -15,6 +15,7 @@ import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/lib/toast";
 import type { Task } from "@/lib/types";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useScopedKey } from "@/lib/auth";
 
 const views = ["all", "inbox", "today", "upcoming", "overdue", "completed"] as const;
 
@@ -41,8 +42,10 @@ export default function TasksPage() {
     return p.toString();
   }, [view, search, projectId, priority, status]);
 
-  const tasksQuery = useQuery({ queryKey: ["tasks", params], queryFn: () => endpoints.tasks(params) });
-  const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: endpoints.projects });
+  const tasksScope = useScopedKey(["tasks"]);
+  const projectsScope = useScopedKey(["projects"]);
+  const tasksQuery = useQuery({ queryKey: useScopedKey(["tasks", params]), queryFn: () => endpoints.tasks(params) });
+  const projectsQuery = useQuery({ queryKey: projectsScope, queryFn: endpoints.projects });
 
   const save = useMutation({
     mutationFn: (value: TaskFormValue) => {
@@ -64,7 +67,7 @@ export default function TasksPage() {
     onSuccess: () => {
       setEditing(null);
       setCreating(false);
-      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: tasksScope });
       toast.push(t("saved"));
     },
     onError: () => toast.push(t("error"), "error"),
@@ -134,17 +137,17 @@ export default function TasksPage() {
             empty={t("noResults")}
             onToggle={async (task) => {
               await endpoints.patchStatus(task.id, task.status === "DONE" ? "TODO" : "DONE");
-              queryClient.invalidateQueries({ queryKey: ["tasks"] });
+              queryClient.invalidateQueries({ queryKey: tasksScope });
             }}
             onEdit={setEditing}
             onDelete={setDeleting}
             onDuplicate={async (task) => {
               await endpoints.duplicateTask(task.id);
-              queryClient.invalidateQueries({ queryKey: ["tasks"] });
+              queryClient.invalidateQueries({ queryKey: tasksScope });
             }}
             onPostpone={async (task) => {
               await endpoints.postponeTask(task.id);
-              queryClient.invalidateQueries({ queryKey: ["tasks"] });
+              queryClient.invalidateQueries({ queryKey: tasksScope });
             }}
           />
         </div>
@@ -166,7 +169,7 @@ export default function TasksPage() {
           if (!deleting) return;
           await endpoints.deleteTask(deleting.id);
           setDeleting(null);
-          queryClient.invalidateQueries({ queryKey: ["tasks"] });
+          queryClient.invalidateQueries({ queryKey: tasksScope });
           toast.push(t("deleted"));
         }}
       />

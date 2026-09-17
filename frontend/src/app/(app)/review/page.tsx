@@ -8,11 +8,12 @@ import { ProgressBar } from "@/components/ui/ProgressBar";
 import { endpoints } from "@/lib/api";
 import { formatMinutes, todayIso } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
+import { useScopedKey } from "@/lib/auth";
 
 export default function ReviewPage() {
   const { t, locale } = useI18n();
   const date = todayIso();
-  const query = useQuery({ queryKey: ["review", date], queryFn: () => endpoints.review(date) });
+  const query = useQuery({ queryKey: useScopedKey(["review", date]), queryFn: () => endpoints.review(date) });
   const data = query.data;
 
   if (query.isLoading) return <p className="text-sm text-muted">{t("loading")}</p>;

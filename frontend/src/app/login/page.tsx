@@ -1,17 +1,17 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { ApiError } from "@/lib/api";
+import { BrandLogo } from "@/components/shell/BrandLogo";
 
 export default function LoginPage() {
   const { login, user, ready } = useAuth();
   const { t, setLocale, locale } = useI18n();
   const router = useRouter();
-  const [email, setEmail] = useState("admin@smartdevco.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,21 +38,14 @@ export default function LoginPage() {
       <div className="relative hidden overflow-hidden bg-sidebar lg:flex lg:flex-col lg:justify-between lg:p-10">
         <div className="pointer-events-none absolute -end-16 -top-16 h-80 w-80 rounded-full bg-accent/20" />
         <div className="relative z-10">
-          <Image src="/brand/logo.svg" alt="SmartDevCo" width={72} height={72} />
-          <div className="mt-8 text-sm tracking-[0.3em] text-white/60">SMARTDEVCO</div>
-          <h1 className="mt-16 text-5xl font-semibold text-white">{t("appName")}</h1>
-          <p className="mt-3 text-lg text-white/70">{t("subtitle")}</p>
+          <BrandLogo size="lg" showSubtitle />
         </div>
         <p className="relative z-10 text-sm text-white/50">{t("focusHint")}</p>
       </div>
       <div className="flex items-center justify-center px-6 py-12">
         <form onSubmit={onSubmit} className="w-full max-w-sm">
-          <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <Image src="/brand/logo.svg" alt="" width={42} height={42} />
-            <div>
-              <div className="font-semibold">{t("appName")}</div>
-              <div className="text-xs text-muted">{t("subtitle")}</div>
-            </div>
+          <div className="mb-8 rounded-2xl bg-sidebar p-4 lg:hidden">
+            <BrandLogo size="md" />
           </div>
           <h2 className="text-2xl font-semibold">{t("signIn")}</h2>
           <p className="mt-1 text-sm text-muted">{t("signInSubtitle")}</p>
@@ -63,6 +56,8 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               type="email"
+              autoComplete="username"
+              placeholder="admin@smartdevco.com"
               required
             />
           </label>

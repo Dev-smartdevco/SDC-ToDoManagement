@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { Sidebar } from "./Sidebar";
 import { MobileNavigation } from "./MobileNavigation";
+import { BrandLogo } from "./BrandLogo";
 import { QuickAdd } from "@/components/quickadd/QuickAdd";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
@@ -55,17 +55,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen md:flex">
+    <div className="min-h-screen bg-bg md:ps-[280px] lg:ps-[300px]">
       <Sidebar onQuickAdd={() => { setQuickKind("task"); setQuickOpen(true); }} />
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-bg/90 px-4 py-3 backdrop-blur md:hidden">
-          <div className="flex items-center gap-2">
-            <Image src="/brand/logo.svg" alt="" width={28} height={28} />
-            <div>
-              <div className="text-sm font-semibold">{t("appName")}</div>
-              <div className="text-[10px] uppercase tracking-[0.14em] text-muted">{t("subtitle")}</div>
-            </div>
-          </div>
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-sidebar px-4 py-3 md:hidden">
+          <BrandLogo size="sm" />
         </header>
         <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-5 md:px-8 md:pb-10 md:pt-8">{children}</main>
       </div>
