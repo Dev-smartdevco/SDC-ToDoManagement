@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { getAnalytics, isSupported } from "firebase/analytics";
-import { getApps, initializeApp } from "firebase/app";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCHw9UJtOGEFWZtGm_Qpz6Xj29lp_C3u3E",
@@ -16,12 +14,24 @@ const firebaseConfig = {
 
 export function FirebaseAnalytics() {
   useEffect(() => {
-    const app = getApps()[0] ?? initializeApp(firebaseConfig);
-    isSupported()
-      .then((ok) => {
-        if (ok) getAnalytics(app);
-      })
-      .catch(() => undefined);
+    let cancelled = false;
+    const start = window.setTimeout(() => {
+      void (async () => {
+        const [{ getApps, initializeApp }, analytics] = await Promise.all([
+          import("firebase/app"),
+          import("firebase/analytics"),
+        ]);
+        if (cancelled) return;
+        const app = getApps()[0] ?? initializeApp(firebaseConfig);
+        const supported = await analytics.isSupported().catch(() => false);
+        if (!cancelled && supported) analytics.getAnalytics(app);
+      })();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(start);
+    };
   }, []);
 
   return null;

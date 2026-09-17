@@ -2,17 +2,18 @@ import { Prisma, type ProjectStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { errors } from "../lib/httpError.js";
 import { categorySelect, projectSelect } from "../lib/category.js";
+import { serializeTaggedTask } from "../lib/taskProgress.js";
 import { categoryStats } from "./categories.service.js";
 
 const taskPreviewInclude = {
   project: { select: projectSelect },
   category: { select: categorySelect },
   tags: { include: { tag: true } },
+  subtasks: { select: { id: true, title: true, status: true }, orderBy: { sortOrder: "asc" as const } },
 };
 
-function serializeTask<T extends { tags: { tag: { id: string; name: string } }[] }>(task: T) {
-  const { tags, ...rest } = task;
-  return { ...rest, tags: tags.map((t) => t.tag) };
+function serializeTask<T extends { tags: { tag: { id: string; name: string } }[]; subtasks?: { id: string; title: string; status: string }[] }>(task: T) {
+  return serializeTaggedTask(task);
 }
 
 export async function listProjects(userId: string) {
@@ -32,7 +33,7 @@ export async function listProjects(userId: string) {
 
   const stats = await prisma.task.groupBy({
     by: ["projectId", "status"],
-    where: { userId, projectId: { not: null } },
+    where: { userId, projectId: { not: null }, parentTaskId: null },
     _count: { _all: true },
   });
 
@@ -45,7 +46,7 @@ export async function listProjects(userId: string) {
       .reduce((sum, s) => sum + s._count._all, 0);
     return {
       ...project,
-      taskCount: project._count.tasks,
+      taskCount: total,
       noteCount: project._count.notes,
       categoryCount: project._count.categories,
       openTasks: open,
@@ -58,38 +59,18 @@ export async function listProjects(userId: string) {
 export async function getProject(userId: string, id: string) {
   const project = await prisma.project.findFirst({ where: { id, userId } });
   if (!project) throw errors.notFound("Project");
+  const today = new Date().toISOString().slice(0, 10);
 
-  const [openTasks, completedTasks, overdueTasks, upcomingTasks, notes, categories] = await Promise.all([
+  const [openTasks, completedTasks, notes, categories] = await Promise.all([
     prisma.task.findMany({
-      where: { userId, projectId: id, status: { in: ["INBOX", "TODO", "IN_PROGRESS"] } },
-      orderBy: [{ priority: "desc" }, { dueDate: "asc" }],
+      where: { userId, projectId: id, parentTaskId: null, status: { in: ["INBOX", "TODO", "IN_PROGRESS"] } },
+      orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }],
       include: taskPreviewInclude,
     }),
     prisma.task.findMany({
-      where: { userId, projectId: id, status: "DONE" },
+      where: { userId, projectId: id, parentTaskId: null, status: "DONE" },
       orderBy: { completedAt: "desc" },
       take: 30,
-      include: taskPreviewInclude,
-    }),
-    prisma.task.findMany({
-      where: {
-        userId,
-        projectId: id,
-        status: { notIn: ["DONE", "CANCELLED"] },
-        dueDate: { lt: new Date().toISOString().slice(0, 10) },
-      },
-      orderBy: { dueDate: "asc" },
-      include: taskPreviewInclude,
-    }),
-    prisma.task.findMany({
-      where: {
-        userId,
-        projectId: id,
-        status: { notIn: ["DONE", "CANCELLED"] },
-        dueDate: { gt: new Date().toISOString().slice(0, 10) },
-      },
-      orderBy: { dueDate: "asc" },
-      take: 20,
       include: taskPreviewInclude,
     }),
     prisma.note.findMany({
@@ -100,8 +81,10 @@ export async function getProject(userId: string, id: string) {
     categoryStats(userId, id),
   ]);
 
+  const overdueTasks = openTasks.filter((task) => task.dueDate && task.dueDate < today);
+  const upcomingTasks = openTasks.filter((task) => task.dueDate && task.dueDate > today).slice(0, 20);
   const total = openTasks.length + completedTasks.length;
-  const progress = total === 0 ? 0 : Math.round((completedTasks.length / (openTasks.length + completedTasks.length)) * 100);
+  const progress = total === 0 ? 0 : Math.round((completedTasks.length / total) * 100);
 
   return {
     ...project,

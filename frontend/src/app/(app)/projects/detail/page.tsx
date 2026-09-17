@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { TaskList } from "@/components/tasks/TaskList";
+import { TaskForm, taskPayload, type TaskFormValue } from "@/components/tasks/TaskForm";
 import { NoteList } from "@/components/notes/NoteList";
 import { Modal } from "@/components/ui/Modal";
 import { CategoryForm, type CategoryFormValue } from "@/components/categories/CategoryForm";
@@ -14,6 +15,7 @@ import { endpoints, ApiError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/lib/toast";
 import { useScopedKey } from "@/lib/auth";
+import { keepPreviousData } from "@/lib/query";
 import type { Category, Task } from "@/lib/types";
 
 function ProjectDetailsInner() {
@@ -29,6 +31,8 @@ function ProjectDetailsInner() {
     queryKey: projectKey,
     queryFn: () => endpoints.project(id),
     enabled: Boolean(id),
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
   const project = query.data;
   const selectedCategory = project?.categories.find((c) => c.id === selectedCategoryId) ?? null;
@@ -37,6 +41,13 @@ function ProjectDetailsInner() {
   const [deleting, setDeleting] = useState<Category | null>(null);
   const [moveTo, setMoveTo] = useState("");
   const [taskCount, setTaskCount] = useState(0);
+  const [taskForm, setTaskForm] = useState<Task | Partial<Task> | null>(null);
+
+  const projectsQuery = useQuery({
+    queryKey: useScopedKey(["projects"]),
+    queryFn: endpoints.projects,
+    staleTime: 5 * 60_000,
+  });
 
   const filterByCategory = (tasks: Task[]) =>
     selectedCategoryId ? tasks.filter((task) => task.categoryId === selectedCategoryId) : tasks;
@@ -71,6 +82,28 @@ function ProjectDetailsInner() {
     toast.push(t("saved"));
   }
 
+  function openNewTask() {
+    setTaskForm({
+      title: "",
+      projectId: id,
+      categoryId: selectedCategoryId || undefined,
+      priority: "MEDIUM",
+      status: "TODO",
+    });
+  }
+
+  async function saveTask(value: TaskFormValue) {
+    const body = taskPayload(value);
+    if (taskForm && "id" in taskForm && taskForm.id) {
+      await endpoints.updateTask(taskForm.id, body);
+    } else {
+      await endpoints.createTask(body);
+    }
+    setTaskForm(null);
+    queryClient.invalidateQueries({ queryKey: projectKey });
+    toast.push(t("saved"));
+  }
+
   async function tryDelete(category: Category) {
     try {
       await endpoints.deleteCategory(category.id);
@@ -99,16 +132,24 @@ function ProjectDetailsInner() {
         title={selectedCategory ? `${project.name}` : project.name}
         description={selectedCategory ? selectedCategory.name : project.description ?? undefined}
         actions={
-          <button
-            onClick={async () => {
-              await endpoints.deleteProject(project.id);
-              toast.push(t("deleted"));
-              router.push("/projects");
-            }}
-            className="text-sm text-danger"
-          >
-            {t("delete")}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={openNewTask}
+              className="rounded-xl bg-sidebar px-4 py-2 text-sm font-medium text-white"
+            >
+              {t("newTask")}
+            </button>
+            <button
+              onClick={async () => {
+                await endpoints.deleteProject(project.id);
+                toast.push(t("deleted"));
+                router.push("/projects");
+              }}
+              className="text-sm text-danger"
+            >
+              {t("delete")}
+            </button>
+          </div>
         }
       />
       <section className="rounded-2xl border border-line bg-white p-4">
@@ -195,7 +236,7 @@ function ProjectDetailsInner() {
               await endpoints.patchStatus(task.id, task.status === "DONE" ? "TODO" : "DONE");
               queryClient.invalidateQueries({ queryKey: projectKey });
             }}
-            onEdit={() => router.push("/tasks")}
+            onEdit={setTaskForm}
             onDelete={async (task) => {
               await endpoints.deleteTask(task.id);
               queryClient.invalidateQueries({ queryKey: projectKey });
@@ -204,7 +245,12 @@ function ProjectDetailsInner() {
         </div>
       </section>
       <section>
-        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{t("openTasks")}</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{t("openTasks")}</h2>
+          <button onClick={openNewTask} className="text-sm font-medium text-accent">
+            {t("newTask")}
+          </button>
+        </div>
         <div className="rounded-2xl border border-line bg-white px-4">
           <TaskList
             tasks={filterByCategory(project.openTasks)}
@@ -212,11 +258,12 @@ function ProjectDetailsInner() {
               await endpoints.patchStatus(task.id, task.status === "DONE" ? "TODO" : "DONE");
               queryClient.invalidateQueries({ queryKey: projectKey });
             }}
-            onEdit={() => router.push("/tasks")}
+            onEdit={setTaskForm}
             onDelete={async (task) => {
               await endpoints.deleteTask(task.id);
               queryClient.invalidateQueries({ queryKey: projectKey });
             }}
+            onReorder={(ids) => endpoints.reorderTasks(ids).then(() => queryClient.invalidateQueries({ queryKey: projectKey }))}
           />
         </div>
       </section>
@@ -229,7 +276,7 @@ function ProjectDetailsInner() {
               await endpoints.patchStatus(task.id, task.status === "DONE" ? "TODO" : "DONE");
               queryClient.invalidateQueries({ queryKey: projectKey });
             }}
-            onEdit={() => router.push("/tasks")}
+            onEdit={setTaskForm}
             onDelete={async (task) => {
               await endpoints.deleteTask(task.id);
               queryClient.invalidateQueries({ queryKey: projectKey });
@@ -246,7 +293,7 @@ function ProjectDetailsInner() {
               await endpoints.patchStatus(task.id, "TODO");
               queryClient.invalidateQueries({ queryKey: projectKey });
             }}
-            onEdit={() => router.push("/tasks")}
+            onEdit={setTaskForm}
             onDelete={async (task) => {
               await endpoints.deleteTask(task.id);
               queryClient.invalidateQueries({ queryKey: projectKey });
@@ -259,6 +306,23 @@ function ProjectDetailsInner() {
         <NoteList notes={notes} onOpen={(note) => router.push(`/notes/detail?id=${note.id}`)} />
       </section>
 
+      <Modal
+        open={Boolean(taskForm)}
+        title={taskForm && "id" in taskForm && taskForm.id ? t("edit") : t("newTask")}
+        onClose={() => setTaskForm(null)}
+      >
+        <TaskForm
+          autoFocus
+          task={taskForm}
+          projects={projectsQuery.data?.length ? projectsQuery.data : [project]}
+          onCancel={() => setTaskForm(null)}
+          onSubmit={saveTask}
+          onToggleSubtask={async (subtaskId, done) => {
+            await endpoints.patchStatus(subtaskId, done ? "DONE" : "TODO");
+            queryClient.invalidateQueries({ queryKey: projectKey });
+          }}
+        />
+      </Modal>
       <Modal
         open={Boolean(categoryForm)}
         title={categoryForm && categoryForm !== "new" ? t("editCategory") : t("addCategory")}

@@ -22,9 +22,14 @@ function NoteDetailsInner() {
     queryKey: noteKey,
     queryFn: () => endpoints.note(id),
     enabled: Boolean(id),
+    staleTime: 30_000,
   });
-  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects });
-  const tasksQuery = useQuery({ queryKey: useScopedKey(["tasks", "notes"]), queryFn: () => endpoints.tasks("limit=100") });
+  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects, staleTime: 5 * 60_000 });
+  const tasksQuery = useQuery({
+    queryKey: useScopedKey(["tasks", "notes"]),
+    queryFn: () => endpoints.tasks("limit=50"),
+    staleTime: 60_000,
+  });
 
   if (!id) return <p className="text-sm text-danger">{t("error")}</p>;
   if (noteQuery.isLoading) return <p className="text-sm text-muted">{t("loading")}</p>;

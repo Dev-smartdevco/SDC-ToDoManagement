@@ -15,6 +15,25 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const USER_CACHE_KEY = "myos.user";
+
+function readCachedUser(): User | null {
+  try {
+    const raw = sessionStorage.getItem(USER_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as User) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedUser(user: User | null) {
+  if (typeof window === "undefined") return;
+  if (!user) {
+    sessionStorage.removeItem(USER_CACHE_KEY);
+    return;
+  }
+  sessionStorage.setItem(USER_CACHE_KEY, JSON.stringify(user));
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -24,8 +43,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   function resetSession() {
     queryClient.clear();
-    queryClient.removeQueries();
     clearToken();
+    writeCachedUser(null);
     setUser(null);
   }
 
@@ -33,12 +52,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const token = getToken();
     if (!token) {
       queryClient.clear();
+      writeCachedUser(null);
+      setUser(null);
       setReady(true);
       return;
     }
+
+    const cached = readCachedUser();
+    if (cached) {
+      setUser(cached);
+      setReady(true);
+    }
+
     endpoints
       .me()
-      .then((me) => setUser(me))
+      .then((me) => {
+        setUser(me);
+        writeCachedUser(me);
+      })
       .catch(() => {
         resetSession();
       })
@@ -52,16 +83,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ready,
       login: async (email, password) => {
         queryClient.clear();
-        queryClient.removeQueries();
         const result = await endpoints.login(email, password);
         setToken(result.token);
         setUser(result.user);
+        writeCachedUser(result.user);
         router.replace("/");
       },
       logout: () => {
         queryClient.clear();
-        queryClient.removeQueries();
         clearToken();
+        writeCachedUser(null);
         setUser(null);
         router.replace("/login");
       },

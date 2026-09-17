@@ -133,7 +133,7 @@ export async function categoryStats(userId: string, projectId: string) {
   });
   const grouped = await prisma.task.groupBy({
     by: ["categoryId", "status"],
-    where: { userId, projectId },
+    where: { userId, projectId, parentTaskId: null },
     _count: { _all: true },
   });
 

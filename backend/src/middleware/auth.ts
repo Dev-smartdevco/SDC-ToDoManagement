@@ -2,7 +2,6 @@ import type { NextFunction, Request, Response } from "express";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { errors } from "../lib/httpError.js";
 import { verifyToken } from "../lib/jwt.js";
-import { prisma } from "../lib/prisma.js";
 
 export type AuthRequest = Request & {
   userId: string;
@@ -16,10 +15,8 @@ export const requireAuth = asyncHandler(async (req: Request, _res: Response, nex
 
   try {
     const payload = verifyToken(token);
-    const user = await prisma.user.findUnique({ where: { id: payload.sub }, select: { id: true, email: true } });
-    if (!user) throw errors.unauthorized();
-    (req as AuthRequest).userId = user.id;
-    (req as AuthRequest).userEmail = user.email;
+    (req as AuthRequest).userId = payload.sub;
+    (req as AuthRequest).userEmail = payload.email;
     next();
   } catch {
     throw errors.unauthorized();

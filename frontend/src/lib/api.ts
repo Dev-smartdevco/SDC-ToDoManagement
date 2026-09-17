@@ -33,7 +33,10 @@ const API_URL =
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
+  const method = (init.method ?? "GET").toUpperCase();
+  if (method !== "GET" && method !== "HEAD" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
@@ -80,6 +83,7 @@ export const endpoints = {
   updateTask: (id: string, body: unknown) => api(`/tasks/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   patchStatus: (id: string, status: string) =>
     api(`/tasks/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  reorderTasks: (ids: string[]) => api("/tasks/reorder", { method: "POST", body: JSON.stringify({ ids }) }),
   deleteTask: (id: string) => api(`/tasks/${id}`, { method: "DELETE" }),
   duplicateTask: (id: string) => api(`/tasks/${id}/duplicate`, { method: "POST" }),
   postponeTask: (id: string, date?: string) =>

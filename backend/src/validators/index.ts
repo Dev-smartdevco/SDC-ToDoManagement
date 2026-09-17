@@ -48,12 +48,26 @@ export const taskSchema = z.object({
   parentTaskId: z.string().uuid().optional().nullable(),
   snoozedUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   tags: z.array(z.string().trim().min(1).max(40)).optional(),
+  subtasks: z
+    .array(
+      z.object({
+        id: z.string().uuid().optional(),
+        title: z.string().trim().min(1).max(200),
+        status: z.enum(["INBOX", "TODO", "IN_PROGRESS", "DONE", "CANCELLED"]).optional(),
+      }),
+    )
+    .max(50)
+    .optional(),
 });
 
 export const taskUpdateSchema = taskSchema.partial();
 
 export const taskStatusSchema = z.object({
   status: z.enum(["INBOX", "TODO", "IN_PROGRESS", "DONE", "CANCELLED"]),
+});
+
+export const taskReorderSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
 });
 
 export const noteSchema = z.object({

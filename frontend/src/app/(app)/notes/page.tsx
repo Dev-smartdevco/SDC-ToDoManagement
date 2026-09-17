@@ -11,6 +11,7 @@ import { endpoints } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useScopedKey } from "@/lib/auth";
+import { keepPreviousData } from "@/lib/query";
 
 export default function NotesPage() {
   const { t } = useI18n();
@@ -30,12 +31,18 @@ export default function NotesPage() {
     return p.toString();
   }, [search, projectId, categoryId, tag]);
 
-  const notesQuery = useQuery({ queryKey: useScopedKey(["notes", params]), queryFn: () => endpoints.notes(params) });
-  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects });
+  const notesQuery = useQuery({
+    queryKey: useScopedKey(["notes", params]),
+    queryFn: () => endpoints.notes(params),
+    placeholderData: keepPreviousData,
+  });
+  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects, staleTime: 5 * 60_000 });
   const categoriesQuery = useQuery({
     queryKey: useScopedKey(["categories", projectId]),
     queryFn: () => endpoints.projectCategories(projectId),
     enabled: Boolean(projectId),
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
   });
   const tags = Array.from(new Set((notesQuery.data ?? []).flatMap((n) => n.tags)));
 

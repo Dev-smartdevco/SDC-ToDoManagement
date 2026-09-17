@@ -3,19 +3,110 @@ import { prisma } from "../lib/prisma.js";
 import { errors } from "../lib/httpError.js";
 import { addDaysIso, todayIso } from "../lib/dates.js";
 import { assertCategoryForProject, categorySelect, projectSelect } from "../lib/category.js";
+import { parentStatusFromSubtasks, serializeTaggedTask } from "../lib/taskProgress.js";
 
 export type TaskView = "all" | "inbox" | "today" | "upcoming" | "overdue" | "completed";
+
+const subtaskSelect = {
+  id: true,
+  title: true,
+  status: true,
+  completedAt: true,
+} as const;
 
 const taskInclude = {
   project: { select: projectSelect },
   category: { select: categorySelect },
   tags: { include: { tag: true } },
-  _count: { select: { subtasks: true } },
+  subtasks: { select: subtaskSelect, orderBy: [{ sortOrder: "asc" as const }, { createdAt: "asc" as const }] },
 };
 
-function serializeTask<T extends { tags: { tag: { id: string; name: string } }[] }>(task: T) {
-  const { tags, ...rest } = task;
-  return { ...rest, tags: tags.map((t) => t.tag) };
+function serializeTask<T extends { tags: { tag: { id: string; name: string } }[]; subtasks?: { id: string; title: string; status: string }[] }>(task: T) {
+  return serializeTaggedTask(task);
+}
+
+async function applyParentProgress(userId: string, parentId: string | null | undefined) {
+  if (!parentId) return;
+  const parent = await prisma.task.findFirst({ where: { id: parentId, userId } });
+  if (!parent || parent.status === "CANCELLED") return;
+  const subtasks = await prisma.task.findMany({
+    where: { parentTaskId: parentId, userId },
+    select: { status: true },
+  });
+  const nextStatus = parentStatusFromSubtasks(parent.status, subtasks);
+  if (!nextStatus || nextStatus === parent.status) return;
+  await prisma.task.update({
+    where: { id: parentId },
+    data: {
+      status: nextStatus,
+      completedAt: nextStatus === "DONE" ? new Date() : null,
+    },
+  });
+  if (nextStatus === "DONE") {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { currentFocusTaskId: true } });
+    if (user?.currentFocusTaskId === parentId) {
+      await prisma.user.update({ where: { id: userId }, data: { currentFocusTaskId: null } });
+    }
+  }
+}
+
+async function syncChecklist(
+  userId: string,
+  parentId: string,
+  items: { id?: string; title: string; status?: TaskStatus }[],
+) {
+  const parent = await prisma.task.findFirst({ where: { id: parentId, userId } });
+  if (!parent) throw errors.notFound("Task");
+
+  const cleaned = items
+    .map((item) => ({ ...item, title: item.title.trim() }))
+    .filter((item) => item.title);
+
+  const existing = await prisma.task.findMany({ where: { parentTaskId: parentId, userId } });
+  const keepIds = new Set(cleaned.map((item) => item.id).filter((id): id is string => Boolean(id)));
+  const removing = existing.filter((item) => !keepIds.has(item.id));
+  if (removing.length) {
+    await prisma.task.deleteMany({ where: { id: { in: removing.map((item) => item.id) } } });
+  }
+
+  for (const [index, item] of cleaned.entries()) {
+    if (item.id && existing.some((row) => row.id === item.id)) {
+      await prisma.task.update({
+        where: { id: item.id },
+        data: {
+          title: item.title,
+          sortOrder: index,
+          ...(item.status
+            ? { status: item.status, completedAt: item.status === "DONE" ? new Date() : null }
+            : {}),
+        },
+      });
+      continue;
+    }
+    await prisma.task.create({
+      data: {
+        userId,
+        title: item.title,
+        parentTaskId: parentId,
+        projectId: parent.projectId,
+        categoryId: parent.categoryId,
+        status: item.status ?? "TODO",
+        priority: "MEDIUM",
+        sortOrder: index,
+        completedAt: item.status === "DONE" ? new Date() : null,
+      },
+    });
+  }
+
+  await applyParentProgress(userId, parentId);
+}
+
+async function nextSortOrder(userId: string, parentTaskId: string | null) {
+  const agg = await prisma.task.aggregate({
+    where: { userId, parentTaskId },
+    _max: { sortOrder: true },
+  });
+  return (agg._max.sortOrder ?? -1) + 1;
 }
 
 async function syncTags(userId: string, taskId: string, names: string[]) {
@@ -33,6 +124,21 @@ async function syncTags(userId: string, taskId: string, names: string[]) {
   if (tags.length) {
     await prisma.taskTag.createMany({
       data: tags.map((tag) => ({ taskId, tagId: tag.id })),
+    });
+  }
+}
+
+async function cascadeParentStatus(userId: string, parentId: string, status: TaskStatus, previous: TaskStatus) {
+  if (status === "DONE" && previous !== "DONE") {
+    await prisma.task.updateMany({
+      where: { parentTaskId: parentId, userId, status: { not: "CANCELLED" } },
+      data: { status: "DONE", completedAt: new Date() },
+    });
+  }
+  if (status !== "DONE" && previous === "DONE") {
+    await prisma.task.updateMany({
+      where: { parentTaskId: parentId, userId, status: "DONE" },
+      data: { status: "TODO", completedAt: null },
     });
   }
 }
@@ -116,7 +222,7 @@ export async function listTasks(
   const [items, total] = await Promise.all([
     prisma.task.findMany({
       where,
-      orderBy: [{ status: "asc" }, { priority: "desc" }, { dueDate: "asc" }, { createdAt: "desc" }],
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
       skip: (page - 1) * limit,
       take: limit,
       include: taskInclude,
@@ -138,7 +244,6 @@ export async function getTask(userId: string, id: string) {
     where: { id, userId },
     include: {
       ...taskInclude,
-      subtasks: { orderBy: { createdAt: "asc" } },
       notes: { orderBy: { updatedAt: "desc" } },
     },
   });
@@ -160,9 +265,11 @@ export async function createTask(
     estimatedMinutes?: number | null;
     parentTaskId?: string | null;
     tags?: string[];
+    subtasks?: { id?: string; title: string; status?: TaskStatus }[];
   },
 ) {
   await assertCategoryForProject(userId, data.categoryId, data.projectId ?? null);
+  const sortOrder = await nextSortOrder(userId, data.parentTaskId ?? null);
   const task = await prisma.task.create({
     data: {
       userId,
@@ -176,9 +283,12 @@ export async function createTask(
       dueTime: data.dueTime ?? null,
       estimatedMinutes: data.estimatedMinutes ?? null,
       parentTaskId: data.parentTaskId ?? null,
+      sortOrder,
     },
   });
   if (data.tags?.length) await syncTags(userId, task.id, data.tags);
+  if (data.subtasks?.length) await syncChecklist(userId, task.id, data.subtasks);
+  if (data.parentTaskId) await applyParentProgress(userId, data.parentTaskId);
   return getTask(userId, task.id);
 }
 
@@ -197,6 +307,7 @@ export async function updateTask(
     estimatedMinutes?: number | null;
     snoozedUntil?: string | null;
     tags?: string[];
+    subtasks?: { id?: string; title: string; status?: TaskStatus }[];
     actualMinutes?: number | null;
   },
 ) {
@@ -236,7 +347,21 @@ export async function updateTask(
     },
   });
 
+  if (data.projectId !== undefined || data.categoryId !== undefined) {
+    await prisma.task.updateMany({
+      where: { parentTaskId: id, userId },
+      data: { projectId: nextProjectId, categoryId: nextCategoryId },
+    });
+  }
+
   if (data.tags) await syncTags(userId, id, data.tags);
+  if (data.subtasks) await syncChecklist(userId, id, data.subtasks);
+  if (data.status && !existing.parentTaskId && !data.subtasks) {
+    await cascadeParentStatus(userId, id, nextStatus, existing.status);
+  }
+  if (existing.parentTaskId && (data.status || data.title)) {
+    await applyParentProgress(userId, existing.parentTaskId);
+  }
   if (nextStatus === "DONE") {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (user?.currentFocusTaskId === id) {
@@ -253,7 +378,9 @@ export async function updateTaskStatus(userId: string, id: string, status: TaskS
 export async function deleteTask(userId: string, id: string) {
   const existing = await prisma.task.findFirst({ where: { id, userId } });
   if (!existing) throw errors.notFound("Task");
+  const parentId = existing.parentTaskId;
   await prisma.task.delete({ where: { id } });
+  if (parentId) await applyParentProgress(userId, parentId);
   return { ok: true };
 }
 
@@ -270,6 +397,7 @@ export async function duplicateTask(userId: string, id: string) {
     dueTime: task.dueTime,
     estimatedMinutes: task.estimatedMinutes,
     tags: task.tags.map((t) => t.name),
+    subtasks: task.subtasks.map((item) => ({ title: item.title, status: "TODO" as const })),
   });
 }
 
@@ -285,4 +413,29 @@ export async function postponeTask(userId: string, id: string, date?: string) {
 
 export async function captureInbox(userId: string, title: string) {
   return createTask(userId, { title, status: "INBOX", priority: "MEDIUM" });
+}
+
+export async function reorderTasks(userId: string, ids: string[]) {
+  const unique = [...new Set(ids)];
+  if (unique.length !== ids.length) throw errors.badRequest("Task ids must be unique.");
+  const existing = await prisma.task.findMany({
+    where: { userId, id: { in: ids } },
+    select: { id: true, sortOrder: true },
+  });
+  if (existing.length !== ids.length) throw errors.badRequest("Invalid tasks.");
+
+  const current = new Map(existing.map((task) => [task.id, task.sortOrder]));
+  const ranks = ids.map((id) => current.get(id) ?? 0).sort((a, b) => a - b);
+  const distinct = new Set(ranks);
+  const nextRanks = distinct.size === ids.length ? ranks : ids.map((_, index) => (ranks[0] ?? 0) + index);
+
+  await prisma.$transaction(
+    ids.map((id, index) =>
+      prisma.task.update({
+        where: { id },
+        data: { sortOrder: nextRanks[index] },
+      }),
+    ),
+  );
+  return { ok: true };
 }

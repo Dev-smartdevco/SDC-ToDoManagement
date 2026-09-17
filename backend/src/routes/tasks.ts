@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { Priority, TaskStatus } from "@prisma/client";
 import { asyncHandler } from "../lib/asyncHandler.js";
-import { paginationSchema, taskSchema, taskStatusSchema, taskUpdateSchema } from "../validators/index.js";
+import { paginationSchema, taskReorderSchema, taskSchema, taskStatusSchema, taskUpdateSchema } from "../validators/index.js";
 import * as tasksService from "../services/tasks.service.js";
 import type { TaskView } from "../services/tasks.service.js";
 import { requireAuth, type AuthRequest } from "../middleware/auth.js";
@@ -47,6 +47,15 @@ tasksRouter.post(
     if (!title) throw errors.badRequest("Title is required.");
     const data = await tasksService.captureInbox((req as AuthRequest).userId, title);
     res.status(201).json(data);
+  }),
+);
+
+tasksRouter.post(
+  "/reorder",
+  asyncHandler(async (req, res) => {
+    const body = taskReorderSchema.parse(req.body);
+    const data = await tasksService.reorderTasks((req as AuthRequest).userId, body.ids);
+    res.json(data);
   }),
 );
 

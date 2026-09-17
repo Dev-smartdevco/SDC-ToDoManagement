@@ -22,7 +22,7 @@ export default function ProjectsPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [color, setColor] = useState(PROJECT_COLORS[0]);
-  const query = useQuery({ queryKey: projectsKey, queryFn: endpoints.projects });
+  const query = useQuery({ queryKey: projectsKey, queryFn: endpoints.projects, staleTime: 5 * 60_000 });
 
   return (
     <div>

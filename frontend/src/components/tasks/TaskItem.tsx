@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Check, MoreHorizontal } from "lucide-react";
 import type { Task } from "@/lib/types";
 import { ContextBadge } from "@/components/ui/ContextBadge";
 import { PriorityBadge } from "@/components/ui/PriorityBadge";
+import { ProgressBar } from "@/components/ui/ProgressBar";
 import { useI18n } from "@/lib/i18n";
 
 export function TaskItem({
@@ -15,6 +16,7 @@ export function TaskItem({
   onDuplicate,
   onPostpone,
   compact,
+  dragHandle,
 }: {
   task: Task;
   onToggle: (task: Task) => void;
@@ -23,6 +25,7 @@ export function TaskItem({
   onDuplicate?: (task: Task) => void;
   onPostpone?: (task: Task) => void;
   compact?: boolean;
+  dragHandle?: ReactNode;
 }) {
   const { t } = useI18n();
   const [menu, setMenu] = useState(false);
@@ -30,6 +33,7 @@ export function TaskItem({
 
   return (
     <div className="group flex items-start gap-3 border-b border-line/80 py-3 last:border-b-0">
+      {dragHandle}
       <button
         onClick={() => onToggle(task)}
         className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
@@ -59,7 +63,17 @@ export function TaskItem({
               {task.daysOverdue === 1 ? t("dayOverdue") : t("daysOverdue", { count: task.daysOverdue })}
             </span>
           ) : null}
+          {task.subtaskProgress?.total ? (
+            <span className="text-[11px] text-muted">
+              {t("completedOf", { completed: task.subtaskProgress.completed, total: task.subtaskProgress.total })}
+            </span>
+          ) : null}
         </div>
+        {task.subtaskProgress?.total ? (
+          <div className="mt-2">
+            <ProgressBar value={task.subtaskProgress.percent} />
+          </div>
+        ) : null}
       </button>
       {!compact ? (
         <div className="relative">

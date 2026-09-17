@@ -275,6 +275,82 @@ describe("MY OS API", () => {
     expect(typeof stats.body.totalTasks).toBe("number");
   });
 
+  it("stores checklist items as subtasks and updates parent status", async () => {
+    const created = await request(app)
+      .post("/api/tasks")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "Checklist parent",
+        projectId,
+        dueDate: todayIso(),
+        subtasks: [{ title: "Step one" }, { title: "Step two" }],
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.subtasks).toHaveLength(2);
+    expect(created.body.subtaskProgress).toEqual({ total: 2, completed: 0, percent: 0 });
+    expect(created.body.status).toBe("TODO");
+
+    const first = created.body.subtasks[0];
+    const second = created.body.subtasks[1];
+    const hidden = await request(app).get("/api/tasks?q=Step%20one").set("Authorization", `Bearer ${token}`);
+    expect(hidden.body.items.some((task: { id: string }) => task.id === first.id)).toBe(false);
+
+    await request(app)
+      .patch(`/api/tasks/${first.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "DONE" });
+    const halfway = await request(app).get(`/api/tasks/${created.body.id}`).set("Authorization", `Bearer ${token}`);
+    expect(halfway.body.status).toBe("IN_PROGRESS");
+    expect(halfway.body.subtaskProgress).toEqual({ total: 2, completed: 1, percent: 50 });
+
+    await request(app)
+      .patch(`/api/tasks/${second.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "DONE" });
+    const done = await request(app).get(`/api/tasks/${created.body.id}`).set("Authorization", `Bearer ${token}`);
+    expect(done.body.status).toBe("DONE");
+    expect(done.body.subtaskProgress).toEqual({ total: 2, completed: 2, percent: 100 });
+
+    await request(app).delete(`/api/tasks/${created.body.id}`).set("Authorization", `Bearer ${token}`);
+  });
+
+  it("reorders tasks with drag order payload", async () => {
+    const first = await request(app)
+      .post("/api/tasks")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Reorder A", projectId, status: "TODO" });
+    const second = await request(app)
+      .post("/api/tasks")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Reorder B", projectId, status: "TODO" });
+    const third = await request(app)
+      .post("/api/tasks")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ title: "Reorder C", projectId, status: "TODO" });
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(third.status).toBe(201);
+
+    const reordered = await request(app)
+      .post("/api/tasks/reorder")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ ids: [third.body.id, first.body.id, second.body.id] });
+    expect(reordered.status).toBe(200);
+
+    const list = await request(app)
+      .get(`/api/tasks?projectId=${projectId}&q=Reorder`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    const ids = list.body.items
+      .filter((task: { title: string }) => task.title.startsWith("Reorder"))
+      .map((task: { id: string }) => task.id);
+    expect(ids).toEqual([third.body.id, first.body.id, second.body.id]);
+
+    await request(app).delete(`/api/tasks/${first.body.id}`).set("Authorization", `Bearer ${token}`);
+    await request(app).delete(`/api/tasks/${second.body.id}`).set("Authorization", `Bearer ${token}`);
+    await request(app).delete(`/api/tasks/${third.body.id}`).set("Authorization", `Bearer ${token}`);
+  });
+
   it("cleans up created records", async () => {
     await request(app).delete(`/api/notes/${noteId}`).set("Authorization", `Bearer ${token}`);
     await request(app).delete(`/api/time-blocks/${blockId}`).set("Authorization", `Bearer ${token}`);

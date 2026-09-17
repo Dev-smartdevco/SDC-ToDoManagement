@@ -6,13 +6,14 @@ import { AuthProvider } from "./auth";
 import { I18nProvider } from "./i18n";
 import { ToastProvider } from "./toast";
 import { FirebaseAnalytics } from "./firebase";
+import { queryDefaults } from "./query";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
     () =>
       new QueryClient({
         defaultOptions: {
-          queries: { staleTime: 10_000, retry: 1, refetchOnWindowFocus: false, gcTime: 5 * 60_000 },
+          queries: queryDefaults,
         },
       }),
   );

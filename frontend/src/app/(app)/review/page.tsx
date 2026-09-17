@@ -12,14 +12,20 @@ import { endpoints } from "@/lib/api";
 import { formatMinutes, todayIso } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { useScopedKey } from "@/lib/auth";
+import { keepPreviousData } from "@/lib/query";
 
 export default function ReviewPage() {
   const { t, locale } = useI18n();
   const date = todayIso();
   const [projectId, setProjectId] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const query = useQuery({ queryKey: useScopedKey(["review", date]), queryFn: () => endpoints.review(date) });
-  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects });
+  const query = useQuery({
+    queryKey: useScopedKey(["review", date]),
+    queryFn: () => endpoints.review(date),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+  });
+  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects, staleTime: 5 * 60_000 });
   const statsParams = useMemo(() => {
     const p = new URLSearchParams();
     if (projectId) p.set("projectId", projectId);
@@ -29,11 +35,14 @@ export default function ReviewPage() {
   const statsQuery = useQuery({
     queryKey: useScopedKey(["stats", statsParams]),
     queryFn: () => endpoints.stats(statsParams),
+    placeholderData: keepPreviousData,
   });
   const categoriesQuery = useQuery({
     queryKey: useScopedKey(["categories", projectId]),
     queryFn: () => endpoints.projectCategories(projectId),
     enabled: Boolean(projectId),
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
   });
   const data = query.data;
   const stats = statsQuery.data;

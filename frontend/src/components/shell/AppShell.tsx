@@ -2,14 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "./Sidebar";
 import { MobileNavigation } from "./MobileNavigation";
-import { BrandLogo } from "./BrandLogo";
+import { MobileTopBar } from "./MobileTopBar";
 import { QuickAdd } from "@/components/quickadd/QuickAdd";
-import { useAuth } from "@/lib/auth";
+import { useAuth, useScopedKey } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { isTypingTarget } from "@/lib/format";
-import { useQueryClient } from "@tanstack/react-query";
+import { endpoints } from "@/lib/api";
+import { invalidateWorkspace } from "@/lib/query";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { ready, user } = useAuth();
@@ -18,6 +20,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickKind, setQuickKind] = useState<"task" | "note" | "project" | "timeBlock" | "idea">("task");
+  const projectsKey = useScopedKey(["projects"]);
+
+  useQuery({
+    queryKey: projectsKey,
+    queryFn: endpoints.projects,
+    staleTime: 5 * 60_000,
+    enabled: Boolean(user),
+  });
 
   useEffect(() => {
     if (ready && !user) router.replace("/login");
@@ -58,9 +68,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-bg md:ps-[280px] lg:ps-[300px]">
       <Sidebar onQuickAdd={() => { setQuickKind("task"); setQuickOpen(true); }} />
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-sidebar px-4 py-3 md:hidden">
-          <BrandLogo size="sm" />
-        </header>
+        <MobileTopBar />
         <main className="mx-auto w-full max-w-5xl px-4 pb-28 pt-5 md:px-8 md:pb-10 md:pt-8">{children}</main>
       </div>
       <MobileNavigation onQuickAdd={() => { setQuickKind("task"); setQuickOpen(true); }} />
@@ -69,7 +77,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         defaultKind={quickKind}
         onClose={() => setQuickOpen(false)}
         onCreated={() => {
-          queryClient.invalidateQueries();
+          void invalidateWorkspace(queryClient, user.id);
         }}
       />
     </div>

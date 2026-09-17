@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Modal } from "@/components/ui/Modal";
-import { TaskForm, type TaskFormValue } from "@/components/tasks/TaskForm";
+import { TaskForm, taskPayload, type TaskFormValue } from "@/components/tasks/TaskForm";
 import { TimeBlockForm } from "@/components/timeblocks/TimeBlockForm";
 import { endpoints } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -36,11 +36,17 @@ export function QuickAdd({
   const [projectName, setProjectName] = useState("");
   const [projectColor, setProjectColor] = useState("#3A96D4");
 
-  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects, enabled: open });
+  const projectsQuery = useQuery({
+    queryKey: useScopedKey(["projects"]),
+    queryFn: endpoints.projects,
+    enabled: open,
+    staleTime: 5 * 60_000,
+  });
   const tasksQuery = useQuery({
     queryKey: useScopedKey(["tasks", "quick"]),
     queryFn: () => endpoints.tasks("view=all&limit=100"),
-    enabled: open,
+    enabled: open && kind === "timeBlock",
+    staleTime: 60_000,
   });
 
   useEffect(() => {
@@ -60,16 +66,8 @@ export function QuickAdd({
 
   async function saveTask(value: TaskFormValue) {
     await endpoints.createTask({
-      title: value.title,
-      projectId: value.projectId || null,
-      categoryId: value.categoryId || null,
-      priority: value.priority,
+      ...taskPayload(value),
       status: value.dueDate ? value.status : "INBOX",
-      dueDate: value.dueDate || null,
-      dueTime: value.dueTime || null,
-      estimatedMinutes: value.estimatedMinutes ? Number(value.estimatedMinutes) : null,
-      description: value.description || null,
-      tags: value.tags ? value.tags.split(",").map((x) => x.trim()).filter(Boolean) : [],
     });
     toast.push(t("created"));
     onCreated?.();

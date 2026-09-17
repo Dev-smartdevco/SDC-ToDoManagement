@@ -35,6 +35,13 @@ export type Category = {
 
 export type Tag = { id: string; name: string };
 
+export type Subtask = {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  completedAt?: string | null;
+};
+
 export type Task = {
   id: string;
   title: string;
@@ -50,11 +57,14 @@ export type Task = {
   completedAt?: string | null;
   parentTaskId?: string | null;
   snoozedUntil?: string | null;
+  sortOrder?: number;
   createdAt: string;
   updatedAt: string;
   project?: Pick<Project, "id" | "name" | "color" | "icon"> | null;
   category?: Pick<Category, "id" | "name" | "color" | "icon" | "projectId"> | null;
   tags?: Tag[];
+  subtasks?: Subtask[];
+  subtaskProgress?: { total: number; completed: number; percent: number };
   daysOverdue?: number;
 };
 

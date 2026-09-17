@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FocusTimer } from "@/components/focus/FocusTimer";
 import { TaskList } from "@/components/tasks/TaskList";
-import { TaskForm, type TaskFormValue } from "@/components/tasks/TaskForm";
+import { TaskForm, taskPayload, type TaskFormValue } from "@/components/tasks/TaskForm";
 import { TimeBlockList } from "@/components/timeblocks/TimeBlockList";
 import { TimeBlockForm } from "@/components/timeblocks/TimeBlockForm";
 import { Modal } from "@/components/ui/Modal";
@@ -15,6 +15,7 @@ import { formatLongDate, greetingKey, isTypingTarget, progressBar, todayIso } fr
 import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/lib/toast";
 import { useScopedKey } from "@/lib/auth";
+import { keepPreviousData } from "@/lib/query";
 import type { Task } from "@/lib/types";
 
 export default function TodayPage() {
@@ -30,18 +31,20 @@ export default function TodayPage() {
   const todayKey = useScopedKey(["today", date]);
   const projectsKey = useScopedKey(["projects"]);
   const tasksKey = useScopedKey(["tasks"]);
-  const reviewKey = useScopedKey(["review"]);
 
-  const todayQuery = useQuery({ queryKey: todayKey, queryFn: () => endpoints.today(date) });
-  const projectsQuery = useQuery({ queryKey: projectsKey, queryFn: endpoints.projects });
+  const todayQuery = useQuery({
+    queryKey: todayKey,
+    queryFn: () => endpoints.today(date),
+    staleTime: 20_000,
+    placeholderData: keepPreviousData,
+  });
+  const projectsQuery = useQuery({ queryKey: projectsKey, queryFn: endpoints.projects, staleTime: 5 * 60_000 });
   const data = todayQuery.data;
   const greeting = t(greetingKey());
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: todayKey });
-    queryClient.invalidateQueries({ queryKey: tasksKey });
-    queryClient.invalidateQueries({ queryKey: reviewKey });
-    queryClient.invalidateQueries({ queryKey: projectsKey });
+    void queryClient.invalidateQueries({ queryKey: todayKey });
+    void queryClient.invalidateQueries({ queryKey: tasksKey });
   };
 
   const toggle = useMutation({
@@ -73,18 +76,7 @@ export default function TodayPage() {
 
   const saveTask = useMutation({
     mutationFn: async (value: TaskFormValue) => {
-      const body = {
-        title: value.title,
-        projectId: value.projectId || null,
-        categoryId: value.categoryId || null,
-        priority: value.priority,
-        status: value.status,
-        dueDate: value.dueDate || null,
-        dueTime: value.dueTime || null,
-        estimatedMinutes: value.estimatedMinutes ? Number(value.estimatedMinutes) : null,
-        description: value.description || null,
-        tags: value.tags.split(",").map((x) => x.trim()).filter(Boolean),
-      };
+      const body = taskPayload(value);
       if (editing) return endpoints.updateTask(editing.id, body);
       return endpoints.createTask(body);
     },
@@ -216,6 +208,7 @@ export default function TodayPage() {
                       await endpoints.duplicateTask(task.id);
                       invalidate();
                     }}
+                    onReorder={(ids) => endpoints.reorderTasks(ids).then(() => invalidate())}
                   />
                 </div>
               ) : null,
@@ -248,6 +241,7 @@ export default function TodayPage() {
             onEdit={setEditing}
             onDelete={setDeleting}
             onPostpone={(task) => postpone.mutate(task)}
+            onReorder={(ids) => endpoints.reorderTasks(ids).then(() => invalidate())}
           />
         </div>
       </section>
@@ -262,6 +256,7 @@ export default function TodayPage() {
             onEdit={setEditing}
             onDelete={setDeleting}
             onPostpone={(task) => postpone.mutate(task)}
+            onReorder={(ids) => endpoints.reorderTasks(ids).then(() => invalidate())}
           />
         </div>
       </section>
@@ -293,6 +288,10 @@ export default function TodayPage() {
           projects={projectsQuery.data ?? []}
           onCancel={() => setEditing(null)}
           onSubmit={(value) => saveTask.mutate(value)}
+          onToggleSubtask={async (id, done) => {
+            await endpoints.patchStatus(id, done ? "DONE" : "TODO");
+            invalidate();
+          }}
         />
       </Modal>
       <Modal open={blockOpen} title={t("addTimeBlock")} onClose={() => setBlockOpen(false)}>

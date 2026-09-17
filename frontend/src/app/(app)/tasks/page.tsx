@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { SearchBar } from "@/components/ui/SearchBar";
 import { FilterBar, Select } from "@/components/ui/FilterBar";
 import { TaskList } from "@/components/tasks/TaskList";
-import { TaskForm, type TaskFormValue } from "@/components/tasks/TaskForm";
+import { TaskForm, taskPayload, type TaskFormValue } from "@/components/tasks/TaskForm";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { endpoints } from "@/lib/api";
@@ -16,6 +16,7 @@ import { useToast } from "@/lib/toast";
 import type { Task } from "@/lib/types";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useScopedKey } from "@/lib/auth";
+import { keepPreviousData } from "@/lib/query";
 
 const views = ["all", "inbox", "today", "upcoming", "overdue", "completed"] as const;
 
@@ -48,28 +49,23 @@ export default function TasksPage() {
 
   const tasksScope = useScopedKey(["tasks"]);
   const projectsScope = useScopedKey(["projects"]);
-  const tasksQuery = useQuery({ queryKey: useScopedKey(["tasks", params]), queryFn: () => endpoints.tasks(params) });
-  const projectsQuery = useQuery({ queryKey: projectsScope, queryFn: endpoints.projects });
+  const tasksQuery = useQuery({
+    queryKey: useScopedKey(["tasks", params]),
+    queryFn: () => endpoints.tasks(params),
+    placeholderData: keepPreviousData,
+  });
+  const projectsQuery = useQuery({ queryKey: projectsScope, queryFn: endpoints.projects, staleTime: 5 * 60_000 });
   const categoriesQuery = useQuery({
     queryKey: useScopedKey(["categories", projectId]),
     queryFn: () => endpoints.projectCategories(projectId),
     enabled: Boolean(projectId),
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
   });
 
   const save = useMutation({
     mutationFn: (value: TaskFormValue) => {
-      const body = {
-        title: value.title,
-        projectId: value.projectId || null,
-        categoryId: value.categoryId || null,
-        priority: value.priority,
-        status: value.status,
-        dueDate: value.dueDate || null,
-        dueTime: value.dueTime || null,
-        estimatedMinutes: value.estimatedMinutes ? Number(value.estimatedMinutes) : null,
-        description: value.description || null,
-        tags: value.tags.split(",").map((x) => x.trim()).filter(Boolean),
-      };
+      const body = taskPayload(value);
       return editing && "id" in editing && editing.id
         ? endpoints.updateTask(editing.id, body)
         : endpoints.createTask(body);
@@ -202,6 +198,7 @@ export default function TasksPage() {
               await endpoints.postponeTask(task.id);
               queryClient.invalidateQueries({ queryKey: tasksScope });
             }}
+            onReorder={(ids) => endpoints.reorderTasks(ids).then(() => queryClient.invalidateQueries({ queryKey: tasksScope }))}
           />
         </div>
       ) : null}
@@ -213,6 +210,10 @@ export default function TasksPage() {
           projects={projectsQuery.data ?? []}
           onCancel={() => { setEditing(null); setCreating(false); }}
           onSubmit={(value) => save.mutate(value)}
+          onToggleSubtask={async (id, done) => {
+            await endpoints.patchStatus(id, done ? "DONE" : "TODO");
+            queryClient.invalidateQueries({ queryKey: tasksScope });
+          }}
         />
       </Modal>
       <ConfirmDialog

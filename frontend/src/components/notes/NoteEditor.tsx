@@ -51,6 +51,7 @@ export function NoteEditor({
     queryKey: useScopedKey(["categories", projectId]),
     queryFn: () => endpoints.projectCategories(projectId),
     enabled: Boolean(projectId),
+    staleTime: 5 * 60_000,
   });
   const categories = categoriesQuery.data ?? [];
 

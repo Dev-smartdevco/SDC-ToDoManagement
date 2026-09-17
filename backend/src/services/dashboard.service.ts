@@ -1,19 +1,26 @@
 import { prisma } from "../lib/prisma.js";
 import { daysBetween, safePercent, todayIso, weekDates } from "../lib/dates.js";
+import { serializeTaggedTask } from "../lib/taskProgress.js";
 import { categoryStats } from "./categories.service.js";
 
 const OPEN_STATUSES = ["INBOX", "TODO", "IN_PROGRESS"] as const;
 
+const taskPreview = {
+  project: { select: { id: true, name: true, color: true, icon: true } },
+  category: { select: { id: true, name: true, color: true, icon: true, projectId: true } },
+  tags: { include: { tag: true } },
+  subtasks: { select: { id: true, title: true, status: true }, orderBy: { sortOrder: "asc" } },
+} as const;
+
 export async function getTodayDashboard(userId: string, date = todayIso()) {
-  const [todayTasks, overdueTasks, laterTasks, timeBlocks, activeFocus, user, completedToday] = await Promise.all([
+  const startOfDay = new Date(`${date}T00:00:00.000Z`);
+  const endOfDay = new Date(`${date}T23:59:59.999Z`);
+
+  const [todayTasks, overdueTasks, laterTasks, timeBlocks, activeFocus, user, focusAgg, existingReview] = await Promise.all([
     prisma.task.findMany({
       where: { userId, parentTaskId: null, dueDate: date, status: { not: "CANCELLED" } },
-      orderBy: [{ priority: "desc" }, { dueTime: "asc" }, { createdAt: "asc" }],
-      include: {
-        project: { select: { id: true, name: true, color: true, icon: true } },
-        category: { select: { id: true, name: true, color: true, icon: true, projectId: true } },
-        tags: { include: { tag: true } },
-      },
+      orderBy: [{ sortOrder: "asc" }, { dueTime: "asc" }, { createdAt: "asc" }],
+      include: taskPreview,
     }),
     prisma.task.findMany({
       where: {
@@ -22,12 +29,8 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
         status: { in: [...OPEN_STATUSES] },
         dueDate: { lt: date, not: null },
       },
-      orderBy: { dueDate: "asc" },
-      include: {
-        project: { select: { id: true, name: true, color: true, icon: true } },
-        category: { select: { id: true, name: true, color: true, icon: true, projectId: true } },
-        tags: { include: { tag: true } },
-      },
+      orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }],
+      include: taskPreview,
     }),
     prisma.task.findMany({
       where: {
@@ -36,13 +39,9 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
         status: { in: [...OPEN_STATUSES] },
         dueDate: { gt: date },
       },
-      orderBy: { dueDate: "asc" },
+      orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }],
       take: 12,
-      include: {
-        project: { select: { id: true, name: true, color: true, icon: true } },
-        category: { select: { id: true, name: true, color: true, icon: true, projectId: true } },
-        tags: { include: { tag: true } },
-      },
+      include: taskPreview,
     }),
     prisma.timeBlock.findMany({
       where: { userId, date },
@@ -57,15 +56,18 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
       include: { task: { include: { project: { select: { id: true, name: true, color: true } } } } },
       orderBy: { startedAt: "desc" },
     }),
-    prisma.user.findUnique({ where: { id: userId } }),
-    prisma.task.findMany({
+    prisma.user.findUnique({ where: { id: userId }, select: { currentFocusTaskId: true } }),
+    prisma.focusSession.aggregate({
       where: {
         userId,
-        parentTaskId: null,
-        status: "DONE",
-        OR: [{ dueDate: date }, { completedAt: { gte: new Date(`${date}T00:00:00.000Z`) } }],
+        status: "COMPLETED",
+        startedAt: { gte: startOfDay, lte: endOfDay },
       },
-      select: { id: true },
+      _sum: { durationMinutes: true },
+    }),
+    prisma.dailyReview.findUnique({
+      where: { userId_date: { userId, date } },
+      select: { plannedTasks: true, completedTasks: true, focusMinutes: true },
     }),
   ]);
 
@@ -74,6 +76,7 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
   const plannedCount = planned.length;
   const completedCount = completed.length;
   const progress = safePercent(completedCount, plannedCount);
+  const focusMinutes = focusAgg._sum.durationMinutes ?? 0;
 
   const focusTaskId = user?.currentFocusTaskId;
   const currentFocus =
@@ -85,44 +88,37 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
     overdueTasks[0] ??
     null;
 
-  const startOfDay = new Date(`${date}T00:00:00.000Z`);
-  const endOfDay = new Date(`${date}T23:59:59.999Z`);
-  const focusAgg = await prisma.focusSession.aggregate({
-    where: {
-      userId,
-      status: "COMPLETED",
-      startedAt: { gte: startOfDay, lte: endOfDay },
-    },
-    _sum: { durationMinutes: true },
-  });
+  if (
+    !existingReview ||
+    existingReview.plannedTasks !== plannedCount ||
+    existingReview.completedTasks !== completedCount ||
+    existingReview.focusMinutes !== focusMinutes
+  ) {
+    await prisma.dailyReview.upsert({
+      where: { userId_date: { userId, date } },
+      update: {
+        plannedTasks: plannedCount,
+        completedTasks: completedCount,
+        focusMinutes,
+      },
+      create: {
+        userId,
+        date,
+        plannedTasks: plannedCount,
+        completedTasks: completedCount,
+        focusMinutes,
+      },
+    });
+  }
 
-  await prisma.dailyReview.upsert({
-    where: { userId_date: { userId, date } },
-    update: {
-      plannedTasks: plannedCount,
-      completedTasks: completedCount,
-      focusMinutes: focusAgg._sum.durationMinutes ?? 0,
-    },
-    create: {
-      userId,
-      date,
-      plannedTasks: plannedCount,
-      completedTasks: completedCount,
-      focusMinutes: focusAgg._sum.durationMinutes ?? 0,
-    },
-  });
-
-  const mapTask = <T extends { tags: { tag: { id: string; name: string } }[] }>(task: T) => {
-    const { tags, ...rest } = task;
-    return { ...rest, tags: tags.map((t) => t.tag) };
-  };
+  const mapTask = serializeTaggedTask;
 
   return {
     date,
     progress,
     plannedCount,
     completedCount,
-    focusMinutes: focusAgg._sum.durationMinutes ?? 0,
+    focusMinutes,
     overdueCount: overdueTasks.length,
     currentFocus: currentFocus ? mapTask(currentFocus) : null,
     activeFocus,
@@ -137,7 +133,6 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
     })),
     later: laterTasks.map(mapTask),
     timeBlocks,
-    completedTodayIds: completedToday.map((t) => t.id),
   };
 }
 
@@ -145,8 +140,10 @@ export async function getWeekReview(userId: string, date = todayIso()) {
   const days = weekDates(date);
   const start = days[0];
   const end = days[6];
+  const startOfDay = new Date(`${date}T00:00:00.000Z`);
+  const endOfDay = new Date(`${date}T23:59:59.999Z`);
 
-  const [reviews, completedTasks, focusSessions, today] = await Promise.all([
+  const [reviews, completedTasks, focusSessions, plannedCount, completedCount, overdueCount, focusAgg] = await Promise.all([
     prisma.dailyReview.findMany({
       where: { userId, date: { gte: start, lte: end } },
       orderBy: { date: "asc" },
@@ -160,7 +157,7 @@ export async function getWeekReview(userId: string, date = todayIso()) {
           lte: new Date(`${end}T23:59:59.999Z`),
         },
       },
-      include: { project: { select: { id: true, name: true, color: true } } },
+      select: { project: { select: { id: true, name: true, color: true } } },
     }),
     prisma.focusSession.findMany({
       where: {
@@ -171,8 +168,30 @@ export async function getWeekReview(userId: string, date = todayIso()) {
           lte: new Date(`${end}T23:59:59.999Z`),
         },
       },
+      select: { startedAt: true, durationMinutes: true },
     }),
-    getTodayDashboard(userId, date),
+    prisma.task.count({
+      where: { userId, parentTaskId: null, dueDate: date, status: { not: "CANCELLED" } },
+    }),
+    prisma.task.count({
+      where: { userId, parentTaskId: null, dueDate: date, status: "DONE" },
+    }),
+    prisma.task.count({
+      where: {
+        userId,
+        parentTaskId: null,
+        status: { in: [...OPEN_STATUSES] },
+        dueDate: { lt: date, not: null },
+      },
+    }),
+    prisma.focusSession.aggregate({
+      where: {
+        userId,
+        status: "COMPLETED",
+        startedAt: { gte: startOfDay, lte: endOfDay },
+      },
+      _sum: { durationMinutes: true },
+    }),
   ]);
 
   const byDay = days.map((day) => {
@@ -203,11 +222,11 @@ export async function getWeekReview(userId: string, date = todayIso()) {
 
   return {
     today: {
-      completed: today.completedCount,
-      planned: today.plannedCount,
-      completion: today.progress,
-      focusMinutes: today.focusMinutes,
-      overdue: today.overdueCount,
+      completed: completedCount,
+      planned: plannedCount,
+      completion: safePercent(completedCount, plannedCount),
+      focusMinutes: focusAgg._sum.durationMinutes ?? 0,
+      overdue: overdueCount,
     },
     week: byDay,
     topProjects: [...projectMap.values()].sort((a, b) => b.completed - a.completed).slice(0, 5),
@@ -231,18 +250,24 @@ export async function getTaskStats(userId: string, query: { projectId?: string; 
     categoryId: query.categoryId || undefined,
   };
 
-  const [total, completed, open, overdue] = await Promise.all([
-    prisma.task.count({ where }),
-    prisma.task.count({ where: { ...where, status: "DONE" } }),
-    prisma.task.count({ where: { ...where, status: { in: [...OPEN_STATUSES] } } }),
+  const [grouped, overdue] = await Promise.all([
+    prisma.task.groupBy({
+      by: ["status"],
+      where,
+      _count: { _all: true },
+    }),
     prisma.task.count({
       where: { ...where, status: { in: [...OPEN_STATUSES] }, dueDate: { lt: today, not: null } },
     }),
   ]);
 
-  const categories = query.projectId && !query.categoryId
-    ? await categoryStats(userId, query.projectId)
-    : [];
+  const total = grouped.reduce((sum, row) => sum + row._count._all, 0);
+  const completed = grouped.filter((row) => row.status === "DONE").reduce((sum, row) => sum + row._count._all, 0);
+  const open = grouped
+    .filter((row) => row.status === "INBOX" || row.status === "TODO" || row.status === "IN_PROGRESS")
+    .reduce((sum, row) => sum + row._count._all, 0);
+
+  const categories = query.projectId && !query.categoryId ? await categoryStats(userId, query.projectId) : [];
 
   return {
     totalTasks: total,
