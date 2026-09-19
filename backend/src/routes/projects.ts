@@ -33,7 +33,7 @@ projectsRouter.get(
   asyncHandler(async (req, res) => {
     const includeArchived = req.query.includeArchived === "true";
     const data = await categoriesService.listCategories(
-      (req as AuthRequest).userId,
+      (req as AuthRequest).actor,
       String(req.params.id),
       includeArchived,
     );

@@ -1,35 +1,50 @@
 import { prisma } from "../lib/prisma.js";
 import { errors, HttpError } from "../lib/httpError.js";
+import {
+  assertCanManageProject,
+  assertWrite,
+  getAccessibleProject,
+  projectAccessWhere,
+  type Actor,
+} from "../lib/access.js";
 
-export async function listCategories(userId: string, projectId?: string, includeArchived = false) {
+const categoryInclude = {
+  project: { select: { id: true, name: true, color: true } },
+  _count: { select: { tasks: true, notes: true } },
+} as const;
+
+export async function listCategories(actor: Actor, projectId?: string, includeArchived = false) {
+  if (projectId) {
+    await getAccessibleProject(actor, projectId);
+  }
+
   return prisma.category.findMany({
     where: {
-      projectId: projectId || undefined,
-      userId: projectId ? undefined : userId,
       archived: includeArchived ? undefined : false,
+      ...(projectId
+        ? { projectId }
+        : { project: projectAccessWhere(actor) }),
     },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    include: {
-      project: { select: { id: true, name: true, color: true } },
-      _count: { select: { tasks: true, notes: true } },
-    },
+    include: categoryInclude,
   });
 }
 
-export async function getCategory(userId: string, id: string) {
+export async function getCategory(actor: Actor, id: string) {
   const category = await prisma.category.findFirst({
-    where: { id, userId },
+    where: { id },
     include: {
-      project: { select: { id: true, name: true, color: true } },
-      _count: { select: { tasks: true, notes: true } },
+      ...categoryInclude,
+      project: true,
     },
   });
   if (!category) throw errors.notFound("Category");
+  await getAccessibleProject(actor, category.projectId);
   return category;
 }
 
 export async function createCategory(
-  userId: string,
+  actor: Actor,
   data: {
     name: string;
     projectId: string;
@@ -39,33 +54,31 @@ export async function createCategory(
     sortOrder?: number;
   },
 ) {
-  const project = await prisma.project.findFirst({ where: { id: data.projectId, userId } });
-  if (!project) throw errors.notFound("Project");
+  assertWrite(actor);
+  const project = await getAccessibleProject(actor, data.projectId);
+  assertCanManageProject(actor, project);
 
   const existing = await prisma.category.findFirst({
-    where: { projectId: data.projectId, name: data.name },
+    where: { projectId: data.projectId, name: data.name.trim() },
   });
   if (existing) throw errors.conflict("A category with this name already exists in the project.");
 
   return prisma.category.create({
     data: {
-      userId,
+      userId: actor.id,
       projectId: data.projectId,
-      name: data.name,
+      name: data.name.trim(),
       description: data.description ?? null,
       icon: data.icon ?? "folder",
       color: data.color ?? "#64748B",
       sortOrder: data.sortOrder ?? 0,
     },
-    include: {
-      project: { select: { id: true, name: true, color: true } },
-      _count: { select: { tasks: true, notes: true } },
-    },
+    include: categoryInclude,
   });
 }
 
 export async function updateCategory(
-  userId: string,
+  actor: Actor,
   id: string,
   data: {
     name?: string;
@@ -76,23 +89,32 @@ export async function updateCategory(
     archived?: boolean;
   },
 ) {
-  await getCategory(userId, id);
+  assertWrite(actor);
+  const category = await getCategory(actor, id);
+  assertCanManageProject(actor, category.project);
+
   return prisma.category.update({
     where: { id },
-    data,
-    include: {
-      project: { select: { id: true, name: true, color: true } },
-      _count: { select: { tasks: true, notes: true } },
+    data: {
+      name: data.name?.trim(),
+      description: data.description,
+      icon: data.icon,
+      color: data.color,
+      sortOrder: data.sortOrder,
+      archived: data.archived,
     },
+    include: categoryInclude,
   });
 }
 
 export async function deleteCategory(
-  userId: string,
+  actor: Actor,
   id: string,
   options?: { moveToCategoryId?: string | null; unassign?: boolean },
 ) {
-  const category = await getCategory(userId, id);
+  assertWrite(actor);
+  const category = await getCategory(actor, id);
+  assertCanManageProject(actor, category.project);
   const taskCount = category._count.tasks;
 
   if (taskCount > 0 && !options?.unassign && !options?.moveToCategoryId) {
@@ -106,27 +128,27 @@ export async function deleteCategory(
 
   if (options?.moveToCategoryId) {
     const target = await prisma.category.findFirst({
-      where: { id: options.moveToCategoryId, userId, projectId: category.projectId },
+      where: { id: options.moveToCategoryId, projectId: category.projectId },
     });
     if (!target) throw errors.badRequest("Target category was not found in this project.");
     await prisma.task.updateMany({
-      where: { categoryId: id, userId },
+      where: { categoryId: id },
       data: { categoryId: target.id },
     });
     await prisma.note.updateMany({
-      where: { categoryId: id, userId },
+      where: { categoryId: id },
       data: { categoryId: target.id },
     });
   } else if (options?.unassign || taskCount > 0) {
-    await prisma.task.updateMany({ where: { categoryId: id, userId }, data: { categoryId: null } });
-    await prisma.note.updateMany({ where: { categoryId: id, userId }, data: { categoryId: null } });
+    await prisma.task.updateMany({ where: { categoryId: id }, data: { categoryId: null } });
+    await prisma.note.updateMany({ where: { categoryId: id }, data: { categoryId: null } });
   }
 
   await prisma.category.delete({ where: { id } });
   return { ok: true };
 }
 
-export async function categoryStats(userId: string, projectId: string) {
+export async function categoryStats(_userId: string, projectId: string) {
   const categories = await prisma.category.findMany({
     where: { projectId, archived: false },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
