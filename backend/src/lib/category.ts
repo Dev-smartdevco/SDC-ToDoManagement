@@ -30,7 +30,7 @@ export async function assertCategoryForProject(
   if (!categoryId) return null;
   if (!projectId) throw errors.badRequest("A project is required when assigning a category.");
   const category = await prisma.category.findFirst({
-    where: { id: categoryId, userId, archived: false },
+    where: { id: categoryId, projectId, archived: false },
   });
   if (!category) throw errors.badRequest("Category was not found.");
   if (category.projectId !== projectId) {

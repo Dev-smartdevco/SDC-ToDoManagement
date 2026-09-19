@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { Check, MoreHorizontal } from "lucide-react";
 import type { Task } from "@/lib/types";
@@ -45,6 +46,7 @@ export function TaskItem({
       </button>
       <button onClick={() => onEdit(task)} className="min-w-0 flex-1 text-start">
         <div className={`text-sm ${done ? "text-muted line-through" : "text-ink"}`}>{task.title}</div>
+        {task.status === "BLOCKED" ? <div className="mt-1 text-[11px] text-danger">{t("blocked")}</div> : null}
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
           <ContextBadge
             project={task.project?.name}
@@ -85,6 +87,9 @@ export function TaskItem({
           </button>
           {menu ? (
             <div className="absolute end-0 z-20 mt-1 w-36 overflow-hidden rounded-xl border border-line bg-white py-1 shadow-soft">
+              <Link href={`/tasks/detail?id=${task.id}`} className="block w-full px-3 py-1.5 text-start text-sm hover:bg-bg" onClick={() => setMenu(false)}>
+                {t("moreDetails")}
+              </Link>
               <button className="block w-full px-3 py-1.5 text-start text-sm hover:bg-bg" onClick={() => { setMenu(false); onEdit(task); }}>
                 {t("edit")}
               </button>

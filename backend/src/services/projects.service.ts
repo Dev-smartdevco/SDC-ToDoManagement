@@ -4,6 +4,15 @@ import { errors } from "../lib/httpError.js";
 import { categorySelect, projectSelect } from "../lib/category.js";
 import { serializeTaggedTask } from "../lib/taskProgress.js";
 import { categoryStats } from "./categories.service.js";
+import {
+  assertCanManageProject,
+  assertWrite,
+  getAccessibleProject,
+  projectAccessWhere,
+  publicUserSelect,
+  type Actor,
+} from "../lib/access.js";
+import { onProjectCompleted } from "./rewards.service.js";
 
 const taskPreviewInclude = {
   project: { select: projectSelect },
@@ -16,9 +25,9 @@ function serializeTask<T extends { tags: { tag: { id: string; name: string } }[]
   return serializeTaggedTask(task);
 }
 
-export async function listProjects(userId: string) {
+export async function listProjects(actor: Actor) {
   const projects = await prisma.project.findMany({
-    where: { userId },
+    where: projectAccessWhere(actor),
     orderBy: { createdAt: "asc" },
     include: {
       _count: {
@@ -31,9 +40,14 @@ export async function listProjects(userId: string) {
     },
   });
 
+  if (!projects.length) return [];
+
   const stats = await prisma.task.groupBy({
     by: ["projectId", "status"],
-    where: { userId, projectId: { not: null }, parentTaskId: null },
+    where: {
+      parentTaskId: null,
+      projectId: { in: projects.map((project) => project.id) },
+    },
     _count: { _all: true },
   });
 
@@ -56,30 +70,49 @@ export async function listProjects(userId: string) {
   });
 }
 
-export async function getProject(userId: string, id: string) {
-  const project = await prisma.project.findFirst({ where: { id, userId } });
-  if (!project) throw errors.notFound("Project");
+export async function getProject(actor: Actor, id: string) {
+  const project = await getAccessibleProject(actor, id);
   const today = new Date().toISOString().slice(0, 10);
 
-  const [openTasks, completedTasks, notes, categories] = await Promise.all([
+  const [openTasks, completedTasks, notes, categories, members, files, activity] = await Promise.all([
     prisma.task.findMany({
-      where: { userId, projectId: id, parentTaskId: null, status: { in: ["INBOX", "TODO", "IN_PROGRESS"] } },
+      where: { projectId: id, parentTaskId: null, status: { in: ["INBOX", "TODO", "IN_PROGRESS", "BLOCKED"] } },
       orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }],
+      take: 120,
       include: taskPreviewInclude,
     }),
     prisma.task.findMany({
-      where: { userId, projectId: id, parentTaskId: null, status: "DONE" },
+      where: { projectId: id, parentTaskId: null, status: "DONE" },
       orderBy: { completedAt: "desc" },
       take: 30,
       include: taskPreviewInclude,
     }),
     prisma.note.findMany({
-      where: { userId, projectId: id },
-      include: { category: { select: categorySelect } },
+      where: { projectId: id },
+      include: { category: { select: categorySelect }, user: { select: publicUserSelect } },
       orderBy: { updatedAt: "desc" },
+      take: 40,
     }),
-    categoryStats(userId, id),
+    categoryStats(project.userId, id),
+    prisma.projectMember.findMany({
+      where: { projectId: id },
+      include: { user: { select: publicUserSelect } },
+      orderBy: { joinedAt: "asc" },
+    }),
+    prisma.fileLink.findMany({
+      where: { projectId: id },
+      include: { user: { select: publicUserSelect } },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.activityLog.findMany({
+      where: { projectId: id },
+      include: { actor: { select: publicUserSelect } },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+    }),
   ]);
+
+  const blockedTasks = openTasks.filter((task) => task.status === "BLOCKED");
 
   const overdueTasks = openTasks.filter((task) => task.dueDate && task.dueDate < today);
   const upcomingTasks = openTasks.filter((task) => task.dueDate && task.dueDate > today).slice(0, 20);
@@ -95,16 +128,25 @@ export async function getProject(userId: string, id: string) {
     upcomingTasks: upcomingTasks.map(serializeTask),
     notes,
     categories,
+    members,
+    files,
+    activity,
+    blockedTasks: blockedTasks.map(serializeTask),
+    dueSoon: upcomingTasks.length,
+    todoCount: openTasks.filter((task) => task.status === "TODO" || task.status === "INBOX").length,
+    inProgressCount: openTasks.filter((task) => task.status === "IN_PROGRESS").length,
+    blockedCount: blockedTasks.length,
   };
 }
 
 export async function createProject(
-  userId: string,
+  actor: Actor,
   data: { name: string; description?: string | null; status?: ProjectStatus; icon?: string; color?: string },
 ) {
-  return prisma.project.create({
+  assertWrite(actor);
+  const project = await prisma.project.create({
     data: {
-      userId,
+      userId: actor.id,
       name: data.name,
       description: data.description ?? null,
       status: data.status ?? "ACTIVE",
@@ -112,17 +154,27 @@ export async function createProject(
       color: data.color ?? "#3A96D4",
     },
   });
+  await prisma.projectMember.create({
+    data: { projectId: project.id, userId: actor.id, role: "OWNER" },
+  });
+  return project;
 }
 
-export async function updateProject(userId: string, id: string, data: Prisma.ProjectUpdateInput) {
-  const existing = await prisma.project.findFirst({ where: { id, userId } });
-  if (!existing) throw errors.notFound("Project");
-  return prisma.project.update({ where: { id }, data });
+export async function updateProject(actor: Actor, id: string, data: Prisma.ProjectUpdateInput) {
+  assertWrite(actor);
+  const existing = await getAccessibleProject(actor, id);
+  assertCanManageProject(actor, existing);
+  const updated = await prisma.project.update({ where: { id }, data });
+  if (data.status === "COMPLETED" && existing.status !== "COMPLETED") {
+    await onProjectCompleted(existing.userId);
+  }
+  return updated;
 }
 
-export async function deleteProject(userId: string, id: string) {
-  const existing = await prisma.project.findFirst({ where: { id, userId } });
-  if (!existing) throw errors.notFound("Project");
+export async function deleteProject(actor: Actor, id: string) {
+  assertWrite(actor);
+  const existing = await getAccessibleProject(actor, id);
+  assertCanManageProject(actor, existing);
   await prisma.project.delete({ where: { id } });
   return { ok: true };
 }

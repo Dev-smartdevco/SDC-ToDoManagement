@@ -31,6 +31,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (ready && !user) router.replace("/login");
+    if (ready && user?.mustChangePassword && typeof window !== "undefined" && window.location.pathname !== "/change-password") {
+      router.replace("/change-password");
+    }
   }, [ready, user, router]);
 
   useEffect(() => {

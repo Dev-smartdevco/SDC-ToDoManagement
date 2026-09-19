@@ -4,12 +4,14 @@ import cors from "cors";
 import { env } from "./lib/env.js";
 import { authRouter } from "./routes/auth.js";
 import { projectsRouter } from "./routes/projects.js";
-import { tasksRouter } from "./routes/tasks.js";
+import { tasksRouter, commentsRouter } from "./routes/tasks.js";
 import { notesRouter } from "./routes/notes.js";
 import { timeBlocksRouter } from "./routes/timeBlocks.js";
 import { focusRouter } from "./routes/focus.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { categoriesRouter } from "./routes/categories.js";
+import { usersRouter } from "./routes/users.js";
+import { collaborationRouter } from "./routes/collaboration.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 
 const DEFAULT_ORIGINS = [
@@ -37,13 +39,16 @@ export function createApp() {
   });
 
   app.use("/api/auth", authRouter);
+  app.use("/api/users", usersRouter);
   app.use("/api/projects", projectsRouter);
   app.use("/api/categories", categoriesRouter);
   app.use("/api/tasks", tasksRouter);
+  app.use("/api/comments", commentsRouter);
   app.use("/api/notes", notesRouter);
   app.use("/api/time-blocks", timeBlocksRouter);
   app.use("/api/focus", focusRouter);
   app.use("/api/dashboard", dashboardRouter);
+  app.use("/api", collaborationRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

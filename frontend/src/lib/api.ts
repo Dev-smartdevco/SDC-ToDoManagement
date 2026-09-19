@@ -57,11 +57,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const endpoints = {
   login: (email: string, password: string) =>
-    api<{ token: string; user: { id: string; email: string; name: string } }>("/auth/login", {
+    api<{ token: string; user: import("./types").AuthUser }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
-  me: () => api<{ id: string; email: string; name: string; currentFocusTaskId: string | null }>("/auth/me"),
+  me: () => api<import("./types").AuthUser>("/auth/me"),
+  changePassword: (body: { currentPassword?: string; newPassword: string }) =>
+    api("/auth/change-password", { method: "POST", body: JSON.stringify(body) }),
   today: (date: string) => api<import("./types").TodayDashboard>(`/dashboard/today?date=${date}`),
   review: (date: string) => api<import("./types").WeekReview>(`/dashboard/review?date=${date}`),
   stats: (params = "") => api<import("./types").DashboardStats>(`/dashboard/stats${params ? `?${params}` : ""}`),
@@ -110,4 +112,47 @@ export const endpoints = {
       body: JSON.stringify({ completeTask }),
     }),
   cancelFocus: (id: string) => api<import("./types").FocusSession>(`/focus/${id}/cancel`, { method: "POST" }),
+  users: (params = "") => api<import("./types").ManagedUser[]>(`/users${params ? `?${params}` : ""}`),
+  user: (id: string) => api<import("./types").ManagedUser>(`/users/${id}`),
+  directory: () => api<import("./types").PublicUser[]>("/users/directory"),
+  createUser: (body: unknown) => api<import("./types").ManagedUser>("/users", { method: "POST", body: JSON.stringify(body) }),
+  updateUser: (id: string, body: unknown) => api(`/users/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  activateUser: (id: string) => api(`/users/${id}/activate`, { method: "POST" }),
+  deactivateUser: (id: string) => api(`/users/${id}/deactivate`, { method: "POST" }),
+  resetPassword: (id: string) => api<{ temporaryPassword: string }>(`/users/${id}/reset-password`, { method: "POST" }),
+  projectMembers: (id: string) => api<import("./types").ProjectMember[]>(`/projects/${id}/members`),
+  addProjectMember: (id: string, body: unknown) =>
+    api(`/projects/${id}/members`, { method: "POST", body: JSON.stringify(body) }),
+  removeProjectMember: (id: string, userId: string) => api(`/projects/${id}/members/${userId}`, { method: "DELETE" }),
+  taskComments: (id: string) => api<import("./types").TaskComment[]>(`/tasks/${id}/comments`),
+  addComment: (id: string, message: string) =>
+    api(`/tasks/${id}/comments`, { method: "POST", body: JSON.stringify({ message }) }),
+  logTime: (id: string, minutes: number) =>
+    api(`/tasks/${id}/time`, { method: "POST", body: JSON.stringify({ minutes }) }),
+  addFile: (body: unknown) => api("/files", { method: "POST", body: JSON.stringify(body) }),
+  deleteFile: (id: string) => api(`/files/${id}`, { method: "DELETE" }),
+  notifications: (unread = false) =>
+    api<import("./types").NotificationItem[]>(`/notifications${unread ? "?unread=true" : ""}`),
+  unreadCount: () => api<{ count: number }>("/notifications/unread-count"),
+  markNotificationRead: (id: string) => api(`/notifications/${id}/read`, { method: "POST" }),
+  markAllNotificationsRead: () => api("/notifications/read-all", { method: "POST" }),
+  team: () => api<Record<string, unknown>>("/team"),
+  activity: (params = "") => api<import("./types").ActivityItem[]>(`/activity${params ? `?${params}` : ""}`),
+  calendar: (params: string) => api<{ tasks: unknown[]; meetings: unknown[] }>(`/calendar?${params}`),
+  analytics: (params = "") => api<Record<string, unknown>>(`/analytics${params ? `?${params}` : ""}`),
+  recognition: () => api<import("./types").RecognitionPost[]>("/recognition"),
+  createRecognition: (body: unknown) =>
+    api("/recognition", { method: "POST", body: JSON.stringify(body) }),
+  rewards: () =>
+    api<{
+      profile: { name?: string; level: number; xp: number; intoLevel: number };
+      catalog: import("./types").Achievement[];
+      earned: import("./types").Achievement[];
+    }>("/rewards"),
+  rewardRules: () => api<{ id: string; type: string; points: number; active: boolean }[]>("/reward-rules"),
+  updateRewardRule: (id: string, body: unknown) =>
+    api(`/reward-rules/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  settings: () => api<Record<string, string>>("/settings"),
+  saveSetting: (key: string, value: string) =>
+    api("/settings", { method: "PUT", body: JSON.stringify({ key, value }) }),
 };

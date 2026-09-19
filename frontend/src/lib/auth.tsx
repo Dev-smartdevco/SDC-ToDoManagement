@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { clearToken, endpoints, getToken, setToken } from "./api";
 
-type User = { id: string; email: string; name: string };
+type User = import("./types").AuthUser;
 
 type AuthContextValue = {
   user: User | null;
@@ -87,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setToken(result.token);
         setUser(result.user);
         writeCachedUser(result.user);
-        router.replace("/");
+        router.replace(result.user.mustChangePassword ? "/change-password" : "/");
       },
       logout: () => {
         queryClient.clear();

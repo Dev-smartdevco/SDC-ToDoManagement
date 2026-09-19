@@ -59,7 +59,7 @@ export async function updateTimeBlock(
   },
 ) {
   const existing = await prisma.timeBlock.findFirst({ where: { id, userId } });
-  if (!existing) throw errors.notFound("Time block");
+  if (!existing) throw errors.notFound("Meeting");
   const startTime = data.startTime ?? existing.startTime;
   const endTime = data.endTime ?? existing.endTime;
   if (endTime <= startTime) throw errors.badRequest("End time must be after start time.");
@@ -75,7 +75,7 @@ export async function updateTimeBlock(
 
 export async function deleteTimeBlock(userId: string, id: string) {
   const existing = await prisma.timeBlock.findFirst({ where: { id, userId } });
-  if (!existing) throw errors.notFound("Time block");
+  if (!existing) throw errors.notFound("Meeting");
   await prisma.timeBlock.delete({ where: { id } });
   return { ok: true };
 }

@@ -18,7 +18,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useScopedKey } from "@/lib/auth";
 import { keepPreviousData } from "@/lib/query";
 
-const views = ["all", "inbox", "today", "upcoming", "overdue", "completed"] as const;
+const views = ["all", "inbox", "today", "upcoming", "overdue", "blocked", "completed"] as const;
 
 export default function TasksPage() {
   const { t } = useI18n();
@@ -102,7 +102,21 @@ export default function TasksPage() {
             onClick={() => setView(item)}
             className={`rounded-full px-3 py-1.5 text-xs font-medium ${view === item ? "bg-sidebar text-white" : "bg-white text-muted"}`}
           >
-            {t(item === "all" ? "all" : item === "inbox" ? "inbox" : item === "today" ? "today" : item === "upcoming" ? "upcoming" : item === "overdue" ? "overdue" : "completed")}
+            {t(
+              item === "all"
+                ? "all"
+                : item === "inbox"
+                  ? "inbox"
+                  : item === "today"
+                    ? "today"
+                    : item === "upcoming"
+                      ? "upcoming"
+                      : item === "overdue"
+                        ? "overdue"
+                        : item === "blocked"
+                          ? "blocked"
+                          : "completed",
+            )}
           </button>
         ))}
       </div>

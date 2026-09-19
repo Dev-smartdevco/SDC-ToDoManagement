@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { asyncHandler } from "../lib/asyncHandler.js";
-import { loginSchema } from "../validators/index.js";
+import { changePasswordSchema, loginSchema } from "../validators/index.js";
 import * as authService from "../services/auth.service.js";
 import { requireAuth, type AuthRequest } from "../middleware/auth.js";
 
@@ -21,5 +21,15 @@ authRouter.get(
   asyncHandler(async (req, res) => {
     const user = await authService.me((req as AuthRequest).userId);
     res.json(user);
+  }),
+);
+
+authRouter.post(
+  "/change-password",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = changePasswordSchema.parse(req.body);
+    const data = await authService.changePassword((req as AuthRequest).userId, body.currentPassword, body.newPassword);
+    res.json(data);
   }),
 );

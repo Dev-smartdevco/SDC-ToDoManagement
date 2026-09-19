@@ -42,11 +42,21 @@ function ProjectDetailsInner() {
   const [moveTo, setMoveTo] = useState("");
   const [taskCount, setTaskCount] = useState(0);
   const [taskForm, setTaskForm] = useState<Task | Partial<Task> | null>(null);
+  const [tab, setTab] = useState<"overview" | "tasks" | "team" | "timeline" | "files" | "notes" | "activity" | "rewards">("overview");
+  const [memberUserId, setMemberUserId] = useState("");
+  const [fileTitle, setFileTitle] = useState("");
+  const [fileUrl, setFileUrl] = useState("");
 
   const projectsQuery = useQuery({
     queryKey: useScopedKey(["projects"]),
     queryFn: endpoints.projects,
     staleTime: 5 * 60_000,
+  });
+  const directory = useQuery({
+    queryKey: useScopedKey(["directory"]),
+    queryFn: endpoints.directory,
+    staleTime: 5 * 60_000,
+    enabled: tab === "team",
   });
 
   const filterByCategory = (tasks: Task[]) =>
@@ -152,14 +162,127 @@ function ProjectDetailsInner() {
           </div>
         }
       />
+      <div className="flex flex-wrap gap-1.5">
+        {(["overview", "tasks", "team", "timeline", "files", "notes", "activity", "rewards"] as const).map((item) => (
+          <button
+            key={item}
+            onClick={() => setTab(item)}
+            className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${tab === item ? "bg-sidebar text-white" : "bg-white text-muted"}`}
+          >
+            {t(item === "files" ? "attachments" : item === "team" ? "members" : item === "timeline" ? "timeline" : item === "rewards" ? "rewards" : item)}
+          </button>
+        ))}
+      </div>
+      {(tab === "overview" || tab === "rewards") ? (
       <section className="rounded-2xl border border-line bg-white p-4">
         <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{t("overview")}</div>
         <ProgressBar value={project.progress} label={`${t("progress")} ${project.progress}%`} />
         <div className="mt-3 text-sm text-muted">
-          {project.openTasks.length} {t("openTasks")} · {project.completedTasks.length} {t("completed")}
+          {(project.openTasks?.length ?? 0) + (project.completedTasks?.length ?? 0)} {t("tasks")} · {project.completedTasks.length} {t("completed")} · {project.openTasks.length} {t("openTasks")}
+          {(project.blockedCount ?? 0) ? ` · ${project.blockedCount} ${t("blocked")}` : ""}
+          {(project.dueSoon ?? 0) ? ` · ${project.dueSoon} ${t("dueSoon")}` : ""}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(project.members ?? []).map((member) => (
+            <span key={member.userId} className="rounded-full bg-bg px-2.5 py-1 text-[11px]">
+              {member.user.name}
+            </span>
+          ))}
         </div>
       </section>
+      ) : null}
 
+      {tab === "team" ? (
+        <section className="rounded-2xl border border-line bg-white p-4">
+          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{t("members")}</h2>
+          {(project.members ?? []).map((member) => (
+            <div key={member.userId} className="flex items-center justify-between border-t border-line py-2 text-sm first:border-t-0">
+              <span>{member.user.name} · {member.user.email}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted">{member.role}</span>
+                {member.role !== "OWNER" ? (
+                  <button
+                    className="text-xs text-danger"
+                    onClick={async () => {
+                      await endpoints.removeProjectMember(id, member.userId);
+                      queryClient.invalidateQueries({ queryKey: projectKey });
+                    }}
+                  >
+                    {t("delete")}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ))}
+          <form
+            className="mt-4 flex gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!memberUserId) return;
+              await endpoints.addProjectMember(id, { userId: memberUserId, role: "MEMBER" });
+              setMemberUserId("");
+              queryClient.invalidateQueries({ queryKey: projectKey });
+              toast.push(t("saved"));
+            }}
+          >
+            <select
+              className="flex-1 rounded-xl border border-line px-3 py-2 text-sm"
+              value={memberUserId}
+              onChange={(e) => setMemberUserId(e.target.value)}
+            >
+              <option value="">{t("addMember")}</option>
+              {(directory.data ?? [])
+                .filter((person) => !(project.members ?? []).some((member) => member.userId === person.id))
+                .map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.name}
+                  </option>
+                ))}
+            </select>
+            <button className="rounded-xl bg-sidebar px-3 py-2 text-sm text-white">{t("save")}</button>
+          </form>
+        </section>
+      ) : null}
+
+      {tab === "files" ? (
+        <section className="rounded-2xl border border-line bg-white p-4">
+          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{t("attachments")}</h2>
+          {(project.files ?? []).map((file) => (
+            <a key={file.id} href={file.url} className="block py-2 text-sm text-accent" target="_blank" rel="noreferrer">
+              {file.title}
+            </a>
+          ))}
+          <form
+            className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              await endpoints.addFile({ title: fileTitle, url: fileUrl, projectId: id });
+              setFileTitle("");
+              setFileUrl("");
+              queryClient.invalidateQueries({ queryKey: projectKey });
+            }}
+          >
+            <input className="rounded-xl border border-line px-3 py-2 text-sm" placeholder={t("title")} value={fileTitle} onChange={(e) => setFileTitle(e.target.value)} />
+            <input className="rounded-xl border border-line px-3 py-2 text-sm" placeholder={t("fileUrl")} value={fileUrl} onChange={(e) => setFileUrl(e.target.value)} />
+            <button className="rounded-xl bg-sidebar px-3 py-2 text-sm text-white">{t("addFile")}</button>
+          </form>
+        </section>
+      ) : null}
+
+      {tab === "activity" || tab === "overview" ? (
+        <section className="rounded-2xl border border-line bg-white p-4">
+          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{t("activity")}</h2>
+          {(project.activity ?? []).slice(0, tab === "overview" ? 5 : 40).map((item) => (
+            <div key={item.id} className="border-t border-line py-2 text-sm first:border-t-0">
+              {item.message}
+            </div>
+          ))}
+          {!(project.activity ?? []).length ? <p className="text-sm text-muted">{t("noResults")}</p> : null}
+        </section>
+      ) : null}
+
+      {tab === "tasks" || tab === "timeline" || tab === "overview" ? (
+      <>
       <section>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{t("categories")}</h2>
@@ -301,10 +424,14 @@ function ProjectDetailsInner() {
           />
         </div>
       </section>
+      </>
+      ) : null}
+      {tab === "notes" ? (
       <section>
         <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{t("notes")}</h2>
         <NoteList notes={notes} onOpen={(note) => router.push(`/notes/detail?id=${note.id}`)} />
       </section>
+      ) : null}
 
       <Modal
         open={Boolean(taskForm)}

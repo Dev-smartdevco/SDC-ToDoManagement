@@ -4,8 +4,8 @@ import { errors, HttpError } from "../lib/httpError.js";
 export async function listCategories(userId: string, projectId?: string, includeArchived = false) {
   return prisma.category.findMany({
     where: {
-      userId,
       projectId: projectId || undefined,
+      userId: projectId ? undefined : userId,
       archived: includeArchived ? undefined : false,
     },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -128,12 +128,12 @@ export async function deleteCategory(
 
 export async function categoryStats(userId: string, projectId: string) {
   const categories = await prisma.category.findMany({
-    where: { userId, projectId, archived: false },
+    where: { projectId, archived: false },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   });
   const grouped = await prisma.task.groupBy({
     by: ["categoryId", "status"],
-    where: { userId, projectId, parentTaskId: null },
+    where: { projectId, parentTaskId: null },
     _count: { _all: true },
   });
 

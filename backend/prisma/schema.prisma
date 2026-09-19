@@ -20,6 +20,7 @@ enum TaskStatus {
   INBOX
   TODO
   IN_PROGRESS
+  BLOCKED
   DONE
   CANCELLED
 }
@@ -38,41 +39,131 @@ enum FocusStatus {
   CANCELLED
 }
 
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum ProjectMemberRole {
+  OWNER
+  MEMBER
+}
+
+enum ActivityType {
+  TASK_CREATED
+  TASK_ASSIGNED
+  USER_ADDED
+  USER_REMOVED
+  STATUS_CHANGED
+  PRIORITY_CHANGED
+  DUE_DATE_CHANGED
+  COMMENT_ADDED
+  TASK_COMPLETED
+  PROJECT_MEMBER_ADDED
+  PROJECT_MEMBER_REMOVED
+  TASK_BLOCKED
+  RECOGNITION_CREATED
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  COMMENT_ADDED
+  PROJECT_ADDED
+  DEADLINE_SOON
+  TASK_COMPLETED
+  RECOGNITION
+}
+
+enum RecognitionVisibility {
+  EVERYONE
+  TEAM
+  PROJECT
+}
+
+enum RewardRuleType {
+  TASK_COMPLETED
+  HIGH_PRIORITY_COMPLETED
+  PROJECT_COMPLETED
+  HELPING_TEAMMATE
+  STREAK_7
+}
+
+enum AchievementCondition {
+  TASKS_COMPLETED
+  PROJECT_COMPLETED
+  TEAM_PLAYER
+  STREAK
+  TOP_CONTRIBUTOR
+}
+
 model User {
-  id                  String         @id @default(uuid())
-  email               String         @unique
-  passwordHash        String
-  name                String
-  currentFocusTaskId  String?
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
-  projects            Project[]
-  tasks               Task[]
-  notes               Note[]
-  timeBlocks          TimeBlock[]
-  focusSessions       FocusSession[]
-  tags                Tag[]
-  dailyReviews        DailyReview[]
-  categories          Category[]
+  id                   String             @id @default(uuid())
+  email                String             @unique
+  passwordHash         String
+  name                 String
+  role                 UserRole           @default(MEMBER)
+  isActive             Boolean            @default(true)
+  lastLoginAt          DateTime?
+  mustChangePassword   Boolean            @default(false)
+  xp                   Int                @default(0)
+  currentFocusTaskId   String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  projects             Project[]
+  tasks                Task[]
+  notes                Note[]
+  timeBlocks           TimeBlock[]
+  focusSessions        FocusSession[]
+  tags                 Tag[]
+  dailyReviews         DailyReview[]
+  categories           Category[]
+  memberships          ProjectMember[]
+  assignments          TaskAssignee[]
+  comments             TaskComment[]
+  activities           ActivityLog[]      @relation("ActivityActor")
+  notifications        Notification[]
+  userAchievements     UserAchievement[]
+  recognitionsGiven    Recognition[]      @relation("RecognitionAuthor")
+  recognitionsReceived Recognition[]      @relation("RecognitionRecipient")
+  blockedTasks         Task[]             @relation("BlockedBy")
+  files                FileLink[]
 }
 
 model Project {
-  id          String        @id @default(uuid())
-  userId      String
-  name        String
-  description String?
-  status      ProjectStatus @default(ACTIVE)
-  icon        String        @default("folder")
-  color       String        @default("#3A96D4")
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  categories  Category[]
-  tasks       Task[]
-  notes       Note[]
-  timeBlocks  TimeBlock[]
+  id           String          @id @default(uuid())
+  userId       String
+  name         String
+  description  String?
+  status       ProjectStatus   @default(ACTIVE)
+  icon         String          @default("folder")
+  color        String          @default("#3A96D4")
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categories   Category[]
+  tasks        Task[]
+  notes        Note[]
+  timeBlocks   TimeBlock[]
+  members      ProjectMember[]
+  files        FileLink[]
+  activities   ActivityLog[]
+  recognitions Recognition[]
 
   @@index([userId, status])
+}
+
+model ProjectMember {
+  projectId String
+  userId    String
+  role      ProjectMemberRole @default(MEMBER)
+  joinedAt  DateTime          @default(now())
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@index([userId])
 }
 
 model Category {
@@ -98,33 +189,42 @@ model Category {
 }
 
 model Task {
-  id                String         @id @default(uuid())
-  userId            String
-  title             String
-  description       String?
-  projectId         String?
-  categoryId        String?
-  status            TaskStatus     @default(INBOX)
-  priority          Priority       @default(MEDIUM)
-  dueDate           String?
-  dueTime           String?
-  estimatedMinutes  Int?
-  actualMinutes     Int?
-  completedAt       DateTime?
-  parentTaskId      String?
-  snoozedUntil      String?
-  sortOrder         Int            @default(0)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project           Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  category          Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  parent            Task?          @relation("Subtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
-  subtasks          Task[]         @relation("Subtasks")
-  notes             Note[]
-  timeBlocks        TimeBlock[]
-  focusSessions     FocusSession[]
-  tags              TaskTag[]
+  id               String         @id @default(uuid())
+  userId           String
+  title            String
+  description      String?
+  projectId        String?
+  categoryId       String?
+  status           TaskStatus     @default(INBOX)
+  priority         Priority       @default(MEDIUM)
+  dueDate          String?
+  dueTime          String?
+  estimatedMinutes Int?
+  actualMinutes    Int?
+  completedAt      DateTime?
+  parentTaskId     String?
+  snoozedUntil     String?
+  sortOrder        Int            @default(0)
+  blockedReason    String?
+  blockedById      String?
+  blockedAt        DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  blockedBy        User?          @relation("BlockedBy", fields: [blockedById], references: [id], onDelete: SetNull)
+  project          Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  category         Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  parent           Task?          @relation("Subtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks         Task[]         @relation("Subtasks")
+  notes            Note[]
+  timeBlocks       TimeBlock[]
+  focusSessions    FocusSession[]
+  tags             TaskTag[]
+  assignees        TaskAssignee[]
+  comments         TaskComment[]
+  files            FileLink[]
+  activities       ActivityLog[]
+  recognitions     Recognition[]
 
   @@index([userId, status])
   @@index([userId, dueDate])
@@ -132,6 +232,138 @@ model Task {
   @@index([userId, sortOrder])
   @@index([categoryId])
   @@index([parentTaskId])
+  @@index([status, dueDate])
+}
+
+model TaskAssignee {
+  taskId    String
+  userId    String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, userId])
+  @@index([userId])
+}
+
+model TaskComment {
+  id        String   @id @default(uuid())
+  taskId    String
+  userId    String
+  message   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+}
+
+model ActivityLog {
+  id        String       @id @default(uuid())
+  type      ActivityType
+  actorId   String
+  userId    String?
+  taskId    String?
+  projectId String?
+  message   String
+  metadata  Json?
+  createdAt DateTime     @default(now())
+  actor     User         @relation("ActivityActor", fields: [actorId], references: [id], onDelete: Cascade)
+  task      Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  project   Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([projectId, createdAt])
+  @@index([taskId, createdAt])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  body      String
+  readAt    DateTime?
+  taskId    String?
+  projectId String?
+  actorId   String?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+}
+
+model Achievement {
+  id          String               @id @default(uuid())
+  key         String               @unique
+  name        String
+  description String
+  icon        String               @default("trophy")
+  condition   AchievementCondition
+  threshold   Int                  @default(1)
+  active      Boolean              @default(true)
+  createdAt   DateTime             @default(now())
+  awards      UserAchievement[]
+}
+
+model UserAchievement {
+  userId        String
+  achievementId String
+  earnedAt      DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@id([userId, achievementId])
+}
+
+model Recognition {
+  id            String                 @id @default(uuid())
+  authorId      String
+  recipientId   String
+  projectId     String?
+  taskId        String?
+  achievementId String?
+  message       String
+  visibility    RecognitionVisibility  @default(EVERYONE)
+  createdAt     DateTime               @default(now())
+  author        User                   @relation("RecognitionAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  recipient     User                   @relation("RecognitionRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  project       Project?               @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  task          Task?                  @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([recipientId, createdAt])
+}
+
+model RewardRule {
+  id        String         @id @default(uuid())
+  type      RewardRuleType @unique
+  points    Int
+  active    Boolean        @default(true)
+  createdAt DateTime       @default(now())
+}
+
+model FileLink {
+  id        String   @id @default(uuid())
+  userId    String
+  projectId String?
+  taskId    String?
+  title     String
+  url       String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([taskId])
+}
+
+model SystemSetting {
+  key   String @id
+  value String
 }
 
 model Note {
@@ -174,18 +406,18 @@ model TimeBlock {
 }
 
 model FocusSession {
-  id                String      @id @default(uuid())
-  userId            String
-  taskId            String
-  startedAt         DateTime
-  endedAt           DateTime?
-  durationMinutes   Int         @default(0)
-  accumulatedSeconds Int        @default(0)
-  status            FocusStatus @default(RUNNING)
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
-  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  task              Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id                 String      @id @default(uuid())
+  userId             String
+  taskId             String
+  startedAt          DateTime
+  endedAt            DateTime?
+  durationMinutes    Int         @default(0)
+  accumulatedSeconds Int         @default(0)
+  status             FocusStatus @default(RUNNING)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task               Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([userId, status])
   @@index([userId, startedAt])

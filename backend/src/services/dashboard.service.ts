@@ -3,7 +3,7 @@ import { daysBetween, safePercent, todayIso, weekDates } from "../lib/dates.js";
 import { serializeTaggedTask } from "../lib/taskProgress.js";
 import { categoryStats } from "./categories.service.js";
 
-const OPEN_STATUSES = ["INBOX", "TODO", "IN_PROGRESS"] as const;
+const OPEN_STATUSES = ["INBOX", "TODO", "IN_PROGRESS", "BLOCKED"] as const;
 
 const taskPreview = {
   project: { select: { id: true, name: true, color: true, icon: true } },
@@ -18,23 +18,29 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
 
   const [todayTasks, overdueTasks, laterTasks, timeBlocks, activeFocus, user, focusAgg, existingReview] = await Promise.all([
     prisma.task.findMany({
-      where: { userId, parentTaskId: null, dueDate: date, status: { not: "CANCELLED" } },
+      where: {
+        OR: [{ userId }, { assignees: { some: { userId } } }],
+        parentTaskId: null,
+        dueDate: date,
+        status: { not: "CANCELLED" },
+      },
       orderBy: [{ sortOrder: "asc" }, { dueTime: "asc" }, { createdAt: "asc" }],
       include: taskPreview,
     }),
     prisma.task.findMany({
       where: {
-        userId,
+        OR: [{ userId }, { assignees: { some: { userId } } }],
         parentTaskId: null,
         status: { in: [...OPEN_STATUSES] },
         dueDate: { lt: date, not: null },
       },
       orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }],
+      take: 40,
       include: taskPreview,
     }),
     prisma.task.findMany({
       where: {
-        userId,
+        OR: [{ userId }, { assignees: { some: { userId } } }],
         parentTaskId: null,
         status: { in: [...OPEN_STATUSES] },
         dueDate: { gt: date },
@@ -264,7 +270,7 @@ export async function getTaskStats(userId: string, query: { projectId?: string; 
   const total = grouped.reduce((sum, row) => sum + row._count._all, 0);
   const completed = grouped.filter((row) => row.status === "DONE").reduce((sum, row) => sum + row._count._all, 0);
   const open = grouped
-    .filter((row) => row.status === "INBOX" || row.status === "TODO" || row.status === "IN_PROGRESS")
+    .filter((row) => row.status === "INBOX" || row.status === "TODO" || row.status === "IN_PROGRESS" || row.status === "BLOCKED")
     .reduce((sum, row) => sum + row._count._all, 0);
 
   const categories = query.projectId && !query.categoryId ? await categoryStats(userId, query.projectId) : [];

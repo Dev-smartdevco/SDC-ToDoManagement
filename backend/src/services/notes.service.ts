@@ -14,7 +14,14 @@ export async function listNotes(
 ) {
   return prisma.note.findMany({
     where: {
-      userId,
+      AND: [
+        {
+          OR: [
+            { userId },
+            { project: { OR: [{ userId }, { members: { some: { userId } } }] } },
+          ],
+        },
+      ],
       projectId: query.projectId || undefined,
       categoryId: query.categoryId || undefined,
       tags: query.tag ? { has: query.tag } : undefined,

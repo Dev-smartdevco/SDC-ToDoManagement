@@ -1,7 +1,8 @@
 export type Priority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-export type TaskStatus = "INBOX" | "TODO" | "IN_PROGRESS" | "DONE" | "CANCELLED";
+export type TaskStatus = "INBOX" | "TODO" | "IN_PROGRESS" | "BLOCKED" | "DONE" | "CANCELLED";
 export type ProjectStatus = "ACTIVE" | "ON_HOLD" | "COMPLETED" | "ARCHIVED";
 export type FocusStatus = "RUNNING" | "PAUSED" | "COMPLETED" | "CANCELLED";
+export type UserRole = "SUPER_ADMIN" | "ADMIN" | "MEMBER" | "VIEWER";
 
 export type Project = {
   id: string;
@@ -66,6 +67,12 @@ export type Task = {
   subtasks?: Subtask[];
   subtaskProgress?: { total: number; completed: number; percent: number };
   daysOverdue?: number;
+  assignees?: Assignee[];
+  blockedReason?: string | null;
+  blockedBy?: PublicUser | null;
+  comments?: TaskComment[];
+  files?: FileLink[];
+  activities?: ActivityItem[];
 };
 
 export type Note = {
@@ -143,6 +150,14 @@ export type ProjectDetails = Project & {
   upcomingTasks: Task[];
   notes: Note[];
   categories: Category[];
+  members?: ProjectMember[];
+  files?: FileLink[];
+  activity?: ActivityItem[];
+  blockedTasks?: Task[];
+  dueSoon?: number;
+  todoCount?: number;
+  inProgressCount?: number;
+  blockedCount?: number;
 };
 
 export type DashboardStats = {
@@ -160,3 +175,99 @@ export type TaskListResponse = {
   total: number;
   totalPages: number;
 };
+
+export type PublicUser = {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  isActive?: boolean;
+};
+
+export type Assignee = PublicUser & { isPrimary?: boolean };
+
+export type AuthUser = PublicUser & {
+  currentFocusTaskId: string | null;
+  mustChangePassword: boolean;
+  xp: number;
+  level: number;
+  intoLevel?: number;
+  progress?: number;
+};
+
+export type ManagedUser = PublicUser & {
+  createdAt: string;
+  lastLoginAt: string | null;
+  xp: number;
+  level: number;
+  activeTasks: number;
+  completedTasks: number;
+  projectsCount: number;
+  temporaryPassword?: string;
+};
+
+export type TaskComment = {
+  id: string;
+  message: string;
+  createdAt: string;
+  updatedAt: string;
+  user: PublicUser;
+};
+
+export type FileLink = {
+  id: string;
+  title: string;
+  url: string;
+  createdAt: string;
+  user?: PublicUser;
+};
+
+export type ActivityItem = {
+  id: string;
+  type: string;
+  message: string;
+  createdAt: string;
+  actor?: PublicUser;
+};
+
+export type NotificationItem = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  readAt: string | null;
+  taskId?: string | null;
+  projectId?: string | null;
+  createdAt: string;
+};
+
+export type RecognitionPost = {
+  id: string;
+  message: string;
+  createdAt: string;
+  visibility: "EVERYONE" | "TEAM" | "PROJECT";
+  author: PublicUser;
+  recipient: PublicUser;
+  project?: Pick<Project, "id" | "name" | "color"> | null;
+  task?: { id: string; title: string } | null;
+};
+
+export type Achievement = {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  icon: string;
+  threshold: number;
+  earned?: boolean;
+  earnedAt?: string;
+};
+
+export type ProjectMember = {
+  projectId: string;
+  userId: string;
+  role: "OWNER" | "MEMBER";
+  joinedAt: string;
+  user: PublicUser;
+};
+

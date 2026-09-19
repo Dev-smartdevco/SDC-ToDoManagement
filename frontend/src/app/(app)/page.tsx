@@ -35,7 +35,7 @@ export default function TodayPage() {
   const todayQuery = useQuery({
     queryKey: todayKey,
     queryFn: () => endpoints.today(date),
-    staleTime: 20_000,
+    staleTime: 30_000,
     placeholderData: keepPreviousData,
   });
   const projectsQuery = useQuery({ queryKey: projectsKey, queryFn: endpoints.projects, staleTime: 5 * 60_000 });

@@ -59,8 +59,21 @@ async function ensureProject(
   data: { name: string; description: string; icon: string; color: string },
 ) {
   const existing = await prisma.project.findFirst({ where: { userId, name: data.name } });
-  if (existing) return existing;
-  return prisma.project.create({ data: { userId, ...data, status: "ACTIVE" } });
+  if (existing) {
+    await prisma.projectMember.upsert({
+      where: { projectId_userId: { projectId: existing.id, userId } },
+      update: {},
+      create: { projectId: existing.id, userId, role: "OWNER" },
+    });
+    return existing;
+  }
+  const project = await prisma.project.create({ data: { userId, ...data, status: "ACTIVE" } });
+  await prisma.projectMember.upsert({
+    where: { projectId_userId: { projectId: project.id, userId } },
+    update: {},
+    create: { projectId: project.id, userId, role: "OWNER" },
+  });
+  return project;
 }
 
 async function ensureCategory(
@@ -99,12 +112,17 @@ async function ensureTask(
 ) {
   const existing = await prisma.task.findFirst({ where: { userId, projectId, title } });
   if (existing) {
+    await prisma.taskAssignee.upsert({
+      where: { taskId_userId: { taskId: existing.id, userId } },
+      update: { isPrimary: true },
+      create: { taskId: existing.id, userId, isPrimary: true },
+    });
     if (!existing.categoryId && extra.categoryId) {
       return prisma.task.update({ where: { id: existing.id }, data: { categoryId: extra.categoryId } });
     }
     return existing;
   }
-  return prisma.task.create({
+  const task = await prisma.task.create({
     data: {
       userId,
       title,
@@ -119,6 +137,12 @@ async function ensureTask(
       completedAt: extra.completedAt ?? null,
     },
   });
+  await prisma.taskAssignee.upsert({
+    where: { taskId_userId: { taskId: task.id, userId } },
+    update: { isPrimary: true },
+    create: { taskId: task.id, userId, isPrimary: true },
+  });
+  return task;
 }
 
 async function main() {
@@ -132,9 +156,14 @@ async function main() {
       data: {
         email,
         name,
+        role: "SUPER_ADMIN",
         passwordHash: await bcrypt.hash(password, 12),
       },
     });
+  }
+
+  if (user.role !== "SUPER_ADMIN") {
+    user = await prisma.user.update({ where: { id: user.id }, data: { role: "SUPER_ADMIN" } });
   }
 
   const today = new Date();

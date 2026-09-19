@@ -30,6 +30,8 @@ export type TaskFormValue = {
   estimatedMinutes: string;
   description: string;
   checklist: ChecklistItem[];
+  assigneeIds: string[];
+  blockedReason: string;
 };
 
 function newItem(): ChecklistItem {
@@ -59,11 +61,13 @@ function formFromTask(task?: Partial<Task> | null): TaskFormValue {
     estimatedMinutes: task?.estimatedMinutes ? String(task.estimatedMinutes) : "",
     description: task?.description ?? "",
     checklist: itemsFromTask(task),
+    assigneeIds: task?.assignees?.map((row) => row.id) ?? [],
+    blockedReason: task?.blockedReason ?? "",
   };
 }
 
 function derivedStatus(items: ChecklistItem[], current: TaskStatus): TaskStatus {
-  if (current === "CANCELLED") return current;
+  if (current === "CANCELLED" || current === "BLOCKED") return current;
   const filled = items.filter((item) => item.title.trim());
   if (!filled.length) return current;
   const completed = filled.filter((item) => item.status === "DONE").length;
@@ -83,6 +87,8 @@ export function taskPayload(value: TaskFormValue) {
     dueTime: value.dueTime || null,
     estimatedMinutes: value.estimatedMinutes ? Number(value.estimatedMinutes) : null,
     description: value.description || null,
+    assigneeIds: value.assigneeIds,
+    blockedReason: value.status === "BLOCKED" ? value.blockedReason || null : null,
     subtasks: value.checklist
       .filter((item) => item.title.trim())
       .map((item) => ({
@@ -121,7 +127,14 @@ export function TaskForm({
     enabled: Boolean(value.projectId),
     staleTime: 5 * 60_000,
   });
+  const directoryQuery = useQuery({
+    queryKey: useScopedKey(["directory"]),
+    queryFn: endpoints.directory,
+    staleTime: 5 * 60_000,
+    enabled: Boolean(value.projectId),
+  });
   const categories = categoriesQuery.data ?? [];
+  const people = directoryQuery.data ?? [];
 
   useEffect(() => {
     if (!value.categoryId) return;
@@ -203,10 +216,44 @@ export function TaskForm({
           <option value="INBOX">INBOX</option>
           <option value="TODO">TODO</option>
           <option value="IN_PROGRESS">IN PROGRESS</option>
+          <option value="BLOCKED">BLOCKED</option>
           <option value="DONE">DONE</option>
           <option value="CANCELLED">CANCELLED</option>
         </select>
       </div>
+      {value.status === "BLOCKED" ? (
+        <input
+          className={field}
+          placeholder={t("blockedReason")}
+          value={value.blockedReason}
+          onChange={(e) => setValue((v) => ({ ...v, blockedReason: e.target.value }))}
+        />
+      ) : null}
+      {people.length ? (
+        <div className="rounded-2xl border border-line bg-bg/60 p-3">
+          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">{t("assignees")}</div>
+          <div className="flex flex-wrap gap-2">
+            {people.map((person) => {
+              const checked = value.assigneeIds.includes(person.id);
+              return (
+                <button
+                  key={person.id}
+                  type="button"
+                  onClick={() =>
+                    setValue((v) => ({
+                      ...v,
+                      assigneeIds: checked ? v.assigneeIds.filter((id) => id !== person.id) : [...v.assigneeIds, person.id],
+                    }))
+                  }
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${checked ? "bg-sidebar text-white" : "bg-white text-muted"}`}
+                >
+                  {person.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-3">
         <input type="date" className={field} value={value.dueDate} onChange={(e) => setValue((v) => ({ ...v, dueDate: e.target.value }))} />
         <input type="time" className={field} value={value.dueTime} onChange={(e) => setValue((v) => ({ ...v, dueTime: e.target.value }))} />

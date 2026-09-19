@@ -351,6 +351,83 @@ describe("MY OS API", () => {
     await request(app).delete(`/api/tasks/${third.body.id}`).set("Authorization", `Bearer ${token}`);
   });
 
+  it("manages users, members, comments, notifications and blocked tasks", { timeout: 120000 }, async () => {
+    const created = await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Ali", email: `ali-${Date.now()}@smartdevco.com`, role: "MEMBER" });
+    expect(created.status).toBe(201);
+    expect(created.body.passwordHash).toBeUndefined();
+    expect(created.body.temporaryPassword).toBeTruthy();
+    const memberId = created.body.id;
+
+    const memberLogin = await request(app).post("/api/auth/login").send({
+      email: created.body.email,
+      password: created.body.temporaryPassword,
+    });
+    expect(memberLogin.status).toBe(200);
+    const memberToken = memberLogin.body.token;
+
+    const forbidden = await request(app).get("/api/users").set("Authorization", `Bearer ${memberToken}`);
+    expect(forbidden.status).toBe(403);
+
+    const added = await request(app)
+      .post(`/api/projects/${projectId}/members`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ userId: memberId, role: "MEMBER" });
+    expect(added.status).toBe(201);
+
+    const shared = await request(app)
+      .post("/api/tasks")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "Shared workspace task",
+        projectId,
+        assigneeIds: [memberId],
+        dueDate: todayIso(),
+      });
+    expect(shared.status).toBe(201);
+    expect(shared.body.assignees?.length).toBeGreaterThanOrEqual(1);
+
+    const comment = await request(app)
+      .post(`/api/tasks/${shared.body.id}/comments`)
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ message: "I updated the mobile layout." });
+    expect(comment.status).toBe(201);
+
+    const notes = await request(app)
+      .get("/api/notifications")
+      .set("Authorization", `Bearer ${token}`);
+    expect(notes.status).toBe(200);
+    expect(Array.isArray(notes.body)).toBe(true);
+
+    const blocked = await request(app)
+      .patch(`/api/tasks/${shared.body.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "BLOCKED", blockedReason: "Waiting for API credentials." });
+    expect(blocked.status).toBe(200);
+    expect(blocked.body.status).toBe("BLOCKED");
+
+    const done = await request(app)
+      .patch(`/api/tasks/${shared.body.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "DONE" });
+    expect(done.status).toBe(200);
+
+    const recognition = await request(app)
+      .post("/api/recognition")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ recipientId: memberId, message: "Great job Ali!" });
+    expect(recognition.status).toBe(201);
+
+    const wall = await request(app).get("/api/recognition").set("Authorization", `Bearer ${memberToken}`);
+    expect(wall.status).toBe(200);
+    expect(wall.body.length).toBeGreaterThan(0);
+
+    await request(app).post(`/api/users/${memberId}/deactivate`).set("Authorization", `Bearer ${token}`);
+    await request(app).delete(`/api/tasks/${shared.body.id}`).set("Authorization", `Bearer ${token}`);
+  });
+
   it("cleans up created records", async () => {
     await request(app).delete(`/api/notes/${noteId}`).set("Authorization", `Bearer ${token}`);
     await request(app).delete(`/api/time-blocks/${blockId}`).set("Authorization", `Bearer ${token}`);

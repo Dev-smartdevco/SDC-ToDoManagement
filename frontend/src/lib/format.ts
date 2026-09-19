@@ -6,6 +6,12 @@ export function todayIso(date = new Date()) {
   return format(date, "yyyy-MM-dd");
 }
 
+export function addDaysIso(dateIso: string, days: number) {
+  const [y, m, d] = dateIso.split("-").map(Number);
+  const next = new Date(y, m - 1, d + days);
+  return format(next, "yyyy-MM-dd");
+}
+
 export function formatLongDate(iso: string, locale: Locale) {
   const [y, m, d] = iso.split("-").map(Number);
   return format(new Date(y, m - 1, d), "EEEE, d MMMM yyyy", { locale: locale === "ar" ? ar : enUS });
