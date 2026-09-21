@@ -5,6 +5,11 @@ import { addDaysIso, todayIso } from "../lib/dates.js";
 import { assertCategoryForProject, categorySelect, projectSelect } from "../lib/category.js";
 import { parentStatusFromSubtasks, serializeTaggedTask } from "../lib/taskProgress.js";
 import {
+  getUserDefaultProjectId,
+  sortByUserDefaultProject,
+  withNestedProjectDefaultFlag,
+} from "../lib/defaultProject.js";
+import {
   assertWrite,
   getAccessibleTask,
   myTaskWhere,
@@ -38,13 +43,17 @@ function serializeTask<
     tags: { tag: { id: string; name: string } }[];
     subtasks?: { id: string; title: string; status: string }[];
     assignees?: { isPrimary: boolean; user: { id: string; name: string; email: string; role: string } }[];
+    project?: { id: string } | null;
   },
->(task: T) {
+>(task: T, defaultProjectId: string | null = null) {
   const base = serializeTaggedTask(task);
-  return {
-    ...base,
-    assignees: (task.assignees ?? []).map((row) => ({ ...row.user, isPrimary: row.isPrimary })),
-  };
+  return withNestedProjectDefaultFlag(
+    {
+      ...base,
+      assignees: (task.assignees ?? []).map((row) => ({ ...row.user, isPrimary: row.isPrimary })),
+    },
+    defaultProjectId,
+  );
 }
 
 async function applyParentProgress(userId: string, parentId: string | null | undefined) {
@@ -268,19 +277,23 @@ export async function listTasks(
   const limit = query.limit ?? 50;
   const where = buildTaskWhere(actor, query);
 
-  const [items, total] = await Promise.all([
+  const [items, total, defaultProjectId] = await Promise.all([
     prisma.task.findMany({
       where,
-      orderBy: [{ project: { isDefault: "desc" } }, { sortOrder: "asc" }, { createdAt: "desc" }],
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
       skip: (page - 1) * limit,
       take: limit,
       include: taskInclude,
     }),
     prisma.task.count({ where }),
+    getUserDefaultProjectId(actor.id),
   ]);
 
   return {
-    items: items.map(serializeTask),
+    items: sortByUserDefaultProject(
+      items.map((item) => serializeTask(item, defaultProjectId)),
+      defaultProjectId,
+    ),
     page,
     limit,
     total,
@@ -302,7 +315,8 @@ export async function getTask(actor: Actor, id: string, detailed = true) {
       : taskInclude,
   });
   if (!task) throw errors.notFound("Task");
-  return serializeTask(task);
+  const defaultProjectId = await getUserDefaultProjectId(actor.id);
+  return serializeTask(task, defaultProjectId);
 }
 
 export async function createTask(

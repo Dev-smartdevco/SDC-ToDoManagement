@@ -26,7 +26,18 @@ export default function ProjectsPage() {
   const query = useQuery({ queryKey: projectsKey, queryFn: endpoints.projects, staleTime: 5 * 60_000 });
 
   async function refresh() {
-    await queryClient.invalidateQueries({ queryKey: projectsKey });
+    await queryClient.invalidateQueries({
+      predicate: (query) =>
+        query.queryKey.some(
+          (part) =>
+            part === "projects" ||
+            part === "today" ||
+            part === "tasks" ||
+            part === "notes" ||
+            part === "calendar" ||
+            part === "stats",
+        ),
+    });
   }
 
   return (

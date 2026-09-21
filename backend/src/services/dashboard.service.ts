@@ -1,82 +1,92 @@
 import { prisma } from "../lib/prisma.js";
 import { daysBetween, safePercent, todayIso, weekDates } from "../lib/dates.js";
 import { serializeTaggedTask } from "../lib/taskProgress.js";
+import { sortByUserDefaultProject, withNestedProjectDefaultFlag } from "../lib/defaultProject.js";
 import { categoryStats } from "./categories.service.js";
 
 const OPEN_STATUSES = ["INBOX", "TODO", "IN_PROGRESS", "BLOCKED"] as const;
 
 const taskPreview = {
-  project: { select: { id: true, name: true, color: true, icon: true, isDefault: true } },
+  project: { select: { id: true, name: true, color: true, icon: true } },
   category: { select: { id: true, name: true, color: true, icon: true, projectId: true } },
   tags: { include: { tag: true } },
   subtasks: { select: { id: true, title: true, status: true }, orderBy: { sortOrder: "asc" } },
 } as const;
 
+function mapTask<T extends { tags: { tag: { id: string; name: string } }[]; project?: { id: string } | null }>(
+  task: T,
+  defaultProjectId: string | null,
+) {
+  return withNestedProjectDefaultFlag(serializeTaggedTask(task), defaultProjectId);
+}
+
 export async function getTodayDashboard(userId: string, date = todayIso()) {
   const startOfDay = new Date(`${date}T00:00:00.000Z`);
   const endOfDay = new Date(`${date}T23:59:59.999Z`);
 
-  const [todayTasks, overdueTasks, laterTasks, timeBlocks, activeFocus, user, focusAgg, existingReview] = await Promise.all([
-    prisma.task.findMany({
-      where: {
-        OR: [{ userId }, { assignees: { some: { userId } } }],
-        parentTaskId: null,
-        dueDate: date,
-        status: { not: "CANCELLED" },
-      },
-      orderBy: [{ project: { isDefault: "desc" } }, { sortOrder: "asc" }, { dueTime: "asc" }, { createdAt: "desc" }],
-      include: taskPreview,
-    }),
-    prisma.task.findMany({
-      where: {
-        OR: [{ userId }, { assignees: { some: { userId } } }],
-        parentTaskId: null,
-        status: { in: [...OPEN_STATUSES] },
-        dueDate: { lt: date, not: null },
-      },
-      orderBy: [{ project: { isDefault: "desc" } }, { sortOrder: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
-      take: 40,
-      include: taskPreview,
-    }),
-    prisma.task.findMany({
-      where: {
-        OR: [{ userId }, { assignees: { some: { userId } } }],
-        parentTaskId: null,
-        status: { in: [...OPEN_STATUSES] },
-        dueDate: { gt: date },
-      },
-      orderBy: [{ project: { isDefault: "desc" } }, { sortOrder: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
-      take: 12,
-      include: taskPreview,
-    }),
-    prisma.timeBlock.findMany({
-      where: { userId, date },
-      orderBy: { startTime: "asc" },
-      include: {
-        project: { select: { id: true, name: true, color: true } },
-        task: { select: { id: true, title: true } },
-      },
-    }),
-    prisma.focusSession.findFirst({
-      where: { userId, status: { in: ["RUNNING", "PAUSED"] } },
-      include: { task: { include: { project: { select: { id: true, name: true, color: true } } } } },
-      orderBy: { startedAt: "desc" },
-    }),
-    prisma.user.findUnique({ where: { id: userId }, select: { currentFocusTaskId: true } }),
-    prisma.focusSession.aggregate({
-      where: {
-        userId,
-        status: "COMPLETED",
-        startedAt: { gte: startOfDay, lte: endOfDay },
-      },
-      _sum: { durationMinutes: true },
-    }),
-    prisma.dailyReview.findUnique({
-      where: { userId_date: { userId, date } },
-      select: { plannedTasks: true, completedTasks: true, focusMinutes: true },
-    }),
-  ]);
+  const [todayTasks, overdueTasks, laterTasks, timeBlocks, activeFocus, user, focusAgg, existingReview] =
+    await Promise.all([
+      prisma.task.findMany({
+        where: {
+          OR: [{ userId }, { assignees: { some: { userId } } }],
+          parentTaskId: null,
+          dueDate: date,
+          status: { not: "CANCELLED" },
+        },
+        orderBy: [{ sortOrder: "asc" }, { dueTime: "asc" }, { createdAt: "desc" }],
+        include: taskPreview,
+      }),
+      prisma.task.findMany({
+        where: {
+          OR: [{ userId }, { assignees: { some: { userId } } }],
+          parentTaskId: null,
+          status: { in: [...OPEN_STATUSES] },
+          dueDate: { lt: date, not: null },
+        },
+        orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
+        take: 40,
+        include: taskPreview,
+      }),
+      prisma.task.findMany({
+        where: {
+          OR: [{ userId }, { assignees: { some: { userId } } }],
+          parentTaskId: null,
+          status: { in: [...OPEN_STATUSES] },
+          dueDate: { gt: date },
+        },
+        orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
+        take: 12,
+        include: taskPreview,
+      }),
+      prisma.timeBlock.findMany({
+        where: { userId, date },
+        orderBy: { startTime: "asc" },
+        include: {
+          project: { select: { id: true, name: true, color: true } },
+          task: { select: { id: true, title: true } },
+        },
+      }),
+      prisma.focusSession.findFirst({
+        where: { userId, status: { in: ["RUNNING", "PAUSED"] } },
+        include: { task: { include: { project: { select: { id: true, name: true, color: true } } } } },
+        orderBy: { startedAt: "desc" },
+      }),
+      prisma.user.findUnique({ where: { id: userId }, select: { currentFocusTaskId: true, defaultProjectId: true } }),
+      prisma.focusSession.aggregate({
+        where: {
+          userId,
+          status: "COMPLETED",
+          startedAt: { gte: startOfDay, lte: endOfDay },
+        },
+        _sum: { durationMinutes: true },
+      }),
+      prisma.dailyReview.findUnique({
+        where: { userId_date: { userId, date } },
+        select: { plannedTasks: true, completedTasks: true, focusMinutes: true },
+      }),
+    ]);
 
+  const defaultProjectId = user?.defaultProjectId ?? null;
   const planned = todayTasks.filter((t) => t.status !== "CANCELLED");
   const completed = planned.filter((t) => t.status === "DONE");
   const plannedCount = planned.length;
@@ -117,12 +127,11 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
     });
   }
 
-  const mapTask = serializeTaggedTask;
-  const byDefaultThenOrder = <T extends { project?: { isDefault?: boolean } | null }>(tasks: T[]) =>
-    [...tasks].sort((a, b) => Number(Boolean(b.project?.isDefault)) - Number(Boolean(a.project?.isDefault)));
-
-  const plannedMapped = planned.map(mapTask);
-  const defaultPlanned = byDefaultThenOrder(plannedMapped.filter((task) => task.project?.isDefault));
+  const plannedMapped = planned.map((task) => mapTask(task, defaultProjectId));
+  const defaultPlanned = sortByUserDefaultProject(
+    plannedMapped.filter((task) => task.project?.isDefault),
+    defaultProjectId,
+  );
   const otherPlanned = plannedMapped.filter((task) => !task.project?.isDefault);
 
   return {
@@ -132,7 +141,7 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
     completedCount,
     focusMinutes,
     overdueCount: overdueTasks.length,
-    currentFocus: currentFocus ? mapTask(currentFocus) : null,
+    currentFocus: currentFocus ? mapTask(currentFocus, defaultProjectId) : null,
     activeFocus,
     todayTasks: {
       default: defaultPlanned,
@@ -140,13 +149,17 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
       normal: otherPlanned.filter((t) => t.priority === "MEDIUM"),
       low: otherPlanned.filter((t) => t.priority === "LOW"),
     },
-    overdue: byDefaultThenOrder(
+    overdue: sortByUserDefaultProject(
       overdueTasks.map((task) => ({
-        ...mapTask(task),
+        ...mapTask(task, defaultProjectId),
         daysOverdue: Math.max(1, daysBetween(task.dueDate as string, date)),
       })),
+      defaultProjectId,
     ),
-    later: byDefaultThenOrder(laterTasks.map(mapTask)),
+    later: sortByUserDefaultProject(
+      laterTasks.map((task) => mapTask(task, defaultProjectId)),
+      defaultProjectId,
+    ),
     timeBlocks,
   };
 }

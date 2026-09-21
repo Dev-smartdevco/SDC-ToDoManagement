@@ -1,8 +1,13 @@
 import { type ProjectStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
-import { errors } from "../lib/httpError.js";
 import { categorySelect, projectSelect } from "../lib/category.js";
 import { serializeTaggedTask } from "../lib/taskProgress.js";
+import {
+  getUserDefaultProjectId,
+  setUserDefaultProject,
+  withNestedProjectDefaultFlag,
+  withProjectDefaultFlag,
+} from "../lib/defaultProject.js";
 import { categoryStats } from "./categories.service.js";
 import {
   assertCanManageProject,
@@ -21,24 +26,33 @@ const taskPreviewInclude = {
   subtasks: { select: { id: true, title: true, status: true }, orderBy: { sortOrder: "asc" as const } },
 };
 
-function serializeTask<T extends { tags: { tag: { id: string; name: string } }[]; subtasks?: { id: string; title: string; status: string }[] }>(task: T) {
-  return serializeTaggedTask(task);
+function serializeTask<
+  T extends {
+    tags: { tag: { id: string; name: string } }[];
+    subtasks?: { id: string; title: string; status: string }[];
+    project?: { id: string } | null;
+  },
+>(task: T, defaultProjectId: string | null) {
+  return withNestedProjectDefaultFlag(serializeTaggedTask(task), defaultProjectId);
 }
 
 export async function listProjects(actor: Actor) {
-  const projects = await prisma.project.findMany({
-    where: projectAccessWhere(actor),
-    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-    include: {
-      _count: {
-        select: {
-          tasks: true,
-          notes: true,
-          categories: true,
+  const [projects, defaultProjectId] = await Promise.all([
+    prisma.project.findMany({
+      where: projectAccessWhere(actor),
+      orderBy: { createdAt: "asc" },
+      include: {
+        _count: {
+          select: {
+            tasks: true,
+            notes: true,
+            categories: true,
+          },
         },
       },
-    },
-  });
+    }),
+    getUserDefaultProjectId(actor.id),
+  ]);
 
   if (!projects.length) return [];
 
@@ -51,27 +65,35 @@ export async function listProjects(actor: Actor) {
     _count: { _all: true },
   });
 
-  return projects.map((project) => {
-    const related = stats.filter((s) => s.projectId === project.id);
-    const total = related.reduce((sum, s) => sum + s._count._all, 0);
-    const done = related.filter((s) => s.status === "DONE").reduce((sum, s) => sum + s._count._all, 0);
-    const open = related
-      .filter((s) => s.status !== "DONE" && s.status !== "CANCELLED")
-      .reduce((sum, s) => sum + s._count._all, 0);
-    return {
-      ...project,
-      taskCount: total,
-      noteCount: project._count.notes,
-      categoryCount: project._count.categories,
-      openTasks: open,
-      completedTasks: done,
-      progress: total === 0 ? 0 : Math.round((done / total) * 100),
-    };
-  });
+  return projects
+    .map((project) => {
+      const related = stats.filter((s) => s.projectId === project.id);
+      const total = related.reduce((sum, s) => sum + s._count._all, 0);
+      const done = related.filter((s) => s.status === "DONE").reduce((sum, s) => sum + s._count._all, 0);
+      const open = related
+        .filter((s) => s.status !== "DONE" && s.status !== "CANCELLED")
+        .reduce((sum, s) => sum + s._count._all, 0);
+      return withProjectDefaultFlag(
+        {
+          ...project,
+          taskCount: total,
+          noteCount: project._count.notes,
+          categoryCount: project._count.categories,
+          openTasks: open,
+          completedTasks: done,
+          progress: total === 0 ? 0 : Math.round((done / total) * 100),
+        },
+        defaultProjectId,
+      );
+    })
+    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.createdAt.getTime() - b.createdAt.getTime());
 }
 
 export async function getProject(actor: Actor, id: string) {
-  const project = await getAccessibleProject(actor, id);
+  const [project, defaultProjectId] = await Promise.all([
+    getAccessibleProject(actor, id),
+    getUserDefaultProjectId(actor.id),
+  ]);
   const today = new Date().toISOString().slice(0, 10);
 
   const [openTasks, completedTasks, notes, categories, members, files, activity] = await Promise.all([
@@ -119,24 +141,27 @@ export async function getProject(actor: Actor, id: string) {
   const total = openTasks.length + completedTasks.length;
   const progress = total === 0 ? 0 : Math.round((completedTasks.length / total) * 100);
 
-  return {
-    ...project,
-    progress,
-    openTasks: openTasks.map(serializeTask),
-    completedTasks: completedTasks.map(serializeTask),
-    overdueTasks: overdueTasks.map(serializeTask),
-    upcomingTasks: upcomingTasks.map(serializeTask),
-    notes,
-    categories,
-    members,
-    files,
-    activity,
-    blockedTasks: blockedTasks.map(serializeTask),
-    dueSoon: upcomingTasks.length,
-    todoCount: openTasks.filter((task) => task.status === "TODO" || task.status === "INBOX").length,
-    inProgressCount: openTasks.filter((task) => task.status === "IN_PROGRESS").length,
-    blockedCount: blockedTasks.length,
-  };
+  return withProjectDefaultFlag(
+    {
+      ...project,
+      progress,
+      openTasks: openTasks.map((task) => serializeTask(task, defaultProjectId)),
+      completedTasks: completedTasks.map((task) => serializeTask(task, defaultProjectId)),
+      overdueTasks: overdueTasks.map((task) => serializeTask(task, defaultProjectId)),
+      upcomingTasks: upcomingTasks.map((task) => serializeTask(task, defaultProjectId)),
+      notes,
+      categories,
+      members,
+      files,
+      activity,
+      blockedTasks: blockedTasks.map((task) => serializeTask(task, defaultProjectId)),
+      dueSoon: upcomingTasks.length,
+      todoCount: openTasks.filter((task) => task.status === "TODO" || task.status === "INBOX").length,
+      inProgressCount: openTasks.filter((task) => task.status === "IN_PROGRESS").length,
+      blockedCount: blockedTasks.length,
+    },
+    defaultProjectId,
+  );
 }
 
 export async function createProject(
@@ -151,9 +176,6 @@ export async function createProject(
   },
 ) {
   assertWrite(actor);
-  if (data.isDefault) {
-    await prisma.project.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
-  }
   const project = await prisma.project.create({
     data: {
       userId: actor.id,
@@ -162,13 +184,15 @@ export async function createProject(
       status: data.status ?? "ACTIVE",
       icon: data.icon ?? "folder",
       color: data.color ?? "#3A96D4",
-      isDefault: data.isDefault ?? false,
     },
   });
   await prisma.projectMember.create({
     data: { projectId: project.id, userId: actor.id, role: "OWNER" },
   });
-  return project;
+  if (data.isDefault) {
+    await setUserDefaultProject(actor.id, project.id);
+  }
+  return withProjectDefaultFlag(project, data.isDefault ? project.id : await getUserDefaultProjectId(actor.id));
 }
 
 export async function updateProject(
@@ -185,28 +209,37 @@ export async function updateProject(
 ) {
   assertWrite(actor);
   const existing = await getAccessibleProject(actor, id);
-  assertCanManageProject(actor, existing);
+
+  // Per-user preference: any member with access can set their own default
   if (data.isDefault === true) {
-    await prisma.project.updateMany({
-      where: { isDefault: true, id: { not: id } },
-      data: { isDefault: false },
-    });
+    await setUserDefaultProject(actor.id, id);
+  } else if (data.isDefault === false) {
+    const current = await getUserDefaultProjectId(actor.id);
+    if (current === id) await setUserDefaultProject(actor.id, null);
   }
+
+  const projectPatch = {
+    name: data.name,
+    description: data.description,
+    status: data.status,
+    icon: data.icon,
+    color: data.color,
+  };
+  const hasProjectUpdates = Object.values(projectPatch).some((value) => value !== undefined);
+
+  if (!hasProjectUpdates) {
+    return withProjectDefaultFlag(existing, await getUserDefaultProjectId(actor.id));
+  }
+
+  assertCanManageProject(actor, existing);
   const updated = await prisma.project.update({
     where: { id },
-    data: {
-      name: data.name,
-      description: data.description,
-      status: data.status,
-      icon: data.icon,
-      color: data.color,
-      isDefault: data.isDefault,
-    },
+    data: projectPatch,
   });
   if (data.status === "COMPLETED" && existing.status !== "COMPLETED") {
     await onProjectCompleted(existing.userId);
   }
-  return updated;
+  return withProjectDefaultFlag(updated, await getUserDefaultProjectId(actor.id));
 }
 
 export async function deleteProject(actor: Actor, id: string) {
