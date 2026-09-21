@@ -10,6 +10,7 @@ import { NoteList } from "@/components/notes/NoteList";
 import { endpoints } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useDefaultProjectFilter } from "@/hooks/useDefaultProjectFilter";
 import { useScopedKey } from "@/lib/auth";
 import { keepPreviousData } from "@/lib/query";
 
@@ -17,10 +18,12 @@ export default function NotesPage() {
   const { t } = useI18n();
   const router = useRouter();
   const [q, setQ] = useState("");
-  const [projectId, setProjectId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [tag, setTag] = useState("");
   const search = useDebouncedValue(q, 250);
+
+  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects, staleTime: 5 * 60_000 });
+  const [projectId, setProjectId] = useDefaultProjectFilter(projectsQuery.data);
 
   const params = useMemo(() => {
     const p = new URLSearchParams();
@@ -36,7 +39,6 @@ export default function NotesPage() {
     queryFn: () => endpoints.notes(params),
     placeholderData: keepPreviousData,
   });
-  const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects, staleTime: 5 * 60_000 });
   const categoriesQuery = useQuery({
     queryKey: useScopedKey(["categories", projectId]),
     queryFn: () => endpoints.projectCategories(projectId),
@@ -53,7 +55,11 @@ export default function NotesPage() {
         actions={
           <button
             onClick={async () => {
-              const note = await endpoints.createNote({ title: t("untitled"), content: "" }) as { id: string };
+              const note = (await endpoints.createNote({
+                title: t("untitled"),
+                content: "",
+                projectId: projectId || null,
+              })) as { id: string };
               router.push(`/notes/detail?id=${note.id}`);
             }}
             className="rounded-xl bg-sidebar px-4 py-2 text-sm font-medium text-white"
@@ -75,7 +81,7 @@ export default function NotesPage() {
             <option value="">{t("project")}</option>
             {(projectsQuery.data ?? []).map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {p.isDefault ? `${p.name} ★` : p.name}
               </option>
             ))}
           </Select>

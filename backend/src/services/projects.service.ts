@@ -1,4 +1,4 @@
-import { Prisma, type ProjectStatus } from "@prisma/client";
+import { type ProjectStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { errors } from "../lib/httpError.js";
 import { categorySelect, projectSelect } from "../lib/category.js";
@@ -28,7 +28,7 @@ function serializeTask<T extends { tags: { tag: { id: string; name: string } }[]
 export async function listProjects(actor: Actor) {
   const projects = await prisma.project.findMany({
     where: projectAccessWhere(actor),
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     include: {
       _count: {
         select: {
@@ -77,7 +77,7 @@ export async function getProject(actor: Actor, id: string) {
   const [openTasks, completedTasks, notes, categories, members, files, activity] = await Promise.all([
     prisma.task.findMany({
       where: { projectId: id, parentTaskId: null, status: { in: ["INBOX", "TODO", "IN_PROGRESS", "BLOCKED"] } },
-      orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }],
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
       take: 120,
       include: taskPreviewInclude,
     }),
@@ -141,9 +141,19 @@ export async function getProject(actor: Actor, id: string) {
 
 export async function createProject(
   actor: Actor,
-  data: { name: string; description?: string | null; status?: ProjectStatus; icon?: string; color?: string },
+  data: {
+    name: string;
+    description?: string | null;
+    status?: ProjectStatus;
+    icon?: string;
+    color?: string;
+    isDefault?: boolean;
+  },
 ) {
   assertWrite(actor);
+  if (data.isDefault) {
+    await prisma.project.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
+  }
   const project = await prisma.project.create({
     data: {
       userId: actor.id,
@@ -152,6 +162,7 @@ export async function createProject(
       status: data.status ?? "ACTIVE",
       icon: data.icon ?? "folder",
       color: data.color ?? "#3A96D4",
+      isDefault: data.isDefault ?? false,
     },
   });
   await prisma.projectMember.create({
@@ -160,11 +171,38 @@ export async function createProject(
   return project;
 }
 
-export async function updateProject(actor: Actor, id: string, data: Prisma.ProjectUpdateInput) {
+export async function updateProject(
+  actor: Actor,
+  id: string,
+  data: {
+    name?: string;
+    description?: string | null;
+    status?: ProjectStatus;
+    icon?: string;
+    color?: string;
+    isDefault?: boolean;
+  },
+) {
   assertWrite(actor);
   const existing = await getAccessibleProject(actor, id);
   assertCanManageProject(actor, existing);
-  const updated = await prisma.project.update({ where: { id }, data });
+  if (data.isDefault === true) {
+    await prisma.project.updateMany({
+      where: { isDefault: true, id: { not: id } },
+      data: { isDefault: false },
+    });
+  }
+  const updated = await prisma.project.update({
+    where: { id },
+    data: {
+      name: data.name,
+      description: data.description,
+      status: data.status,
+      icon: data.icon,
+      color: data.color,
+      isDefault: data.isDefault,
+    },
+  });
   if (data.status === "COMPLETED" && existing.status !== "COMPLETED") {
     await onProjectCompleted(existing.userId);
   }

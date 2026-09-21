@@ -16,6 +16,7 @@ export const projectSchema = z.object({
   status: z.enum(["ACTIVE", "ON_HOLD", "COMPLETED", "ARCHIVED"]).optional(),
   icon: z.string().trim().max(40).optional(),
   color: z.string().trim().max(20).optional(),
+  isDefault: z.boolean().optional(),
 });
 
 export const categorySchema = z.object({

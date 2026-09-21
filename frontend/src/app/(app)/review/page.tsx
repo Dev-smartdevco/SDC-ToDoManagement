@@ -13,11 +13,11 @@ import { formatMinutes, todayIso } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { useScopedKey } from "@/lib/auth";
 import { keepPreviousData } from "@/lib/query";
+import { useDefaultProjectFilter } from "@/hooks/useDefaultProjectFilter";
 
 export default function ReviewPage() {
   const { t, locale } = useI18n();
   const date = todayIso();
-  const [projectId, setProjectId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const query = useQuery({
     queryKey: useScopedKey(["review", date]),
@@ -26,6 +26,7 @@ export default function ReviewPage() {
     placeholderData: keepPreviousData,
   });
   const projectsQuery = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects, staleTime: 5 * 60_000 });
+  const [projectId, setProjectId] = useDefaultProjectFilter(projectsQuery.data);
   const statsParams = useMemo(() => {
     const p = new URLSearchParams();
     if (projectId) p.set("projectId", projectId);
@@ -84,7 +85,7 @@ export default function ReviewPage() {
             <option value="">{t("allProjects")}</option>
             {(projectsQuery.data ?? []).map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {p.isDefault ? `${p.name} ★` : p.name}
               </option>
             ))}
           </Select>

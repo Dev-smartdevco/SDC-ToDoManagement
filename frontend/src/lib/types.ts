@@ -11,6 +11,7 @@ export type Project = {
   status: ProjectStatus;
   icon: string;
   color: string;
+  isDefault?: boolean;
   progress?: number;
   openTasks?: number;
   completedTasks?: number;
@@ -61,7 +62,7 @@ export type Task = {
   sortOrder?: number;
   createdAt: string;
   updatedAt: string;
-  project?: Pick<Project, "id" | "name" | "color" | "icon"> | null;
+  project?: Pick<Project, "id" | "name" | "color" | "icon" | "isDefault"> | null;
   category?: Pick<Category, "id" | "name" | "color" | "icon" | "projectId"> | null;
   tags?: Tag[];
   subtasks?: Subtask[];
@@ -85,7 +86,7 @@ export type Note = {
   tags: string[];
   createdAt: string;
   updatedAt: string;
-  project?: Pick<Project, "id" | "name" | "color"> | null;
+  project?: Pick<Project, "id" | "name" | "color" | "isDefault"> | null;
   category?: Pick<Category, "id" | "name" | "color" | "icon" | "projectId"> | null;
   task?: { id: string; title: string } | null;
 };
@@ -124,7 +125,7 @@ export type TodayDashboard = {
   overdueCount: number;
   currentFocus: Task | null;
   activeFocus: FocusSession | null;
-  todayTasks: { high: Task[]; normal: Task[]; low: Task[] };
+  todayTasks: { default?: Task[]; high: Task[]; normal: Task[]; low: Task[] };
   overdue: Task[];
   later: Task[];
   timeBlocks: TimeBlock[];

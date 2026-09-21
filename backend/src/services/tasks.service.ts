@@ -126,9 +126,10 @@ async function syncChecklist(
 async function nextSortOrder(userId: string, parentTaskId: string | null) {
   const agg = await prisma.task.aggregate({
     where: { userId, parentTaskId },
-    _max: { sortOrder: true },
+    _min: { sortOrder: true },
   });
-  return (agg._max.sortOrder ?? -1) + 1;
+  // Newer tasks get a lower sortOrder so they appear first (ASC list = newest on top).
+  return (agg._min.sortOrder ?? 0) - 1;
 }
 
 async function syncTags(userId: string, taskId: string, names: string[]) {
@@ -270,7 +271,7 @@ export async function listTasks(
   const [items, total] = await Promise.all([
     prisma.task.findMany({
       where,
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+      orderBy: [{ project: { isDefault: "desc" } }, { sortOrder: "asc" }, { createdAt: "desc" }],
       skip: (page - 1) * limit,
       take: limit,
       include: taskInclude,

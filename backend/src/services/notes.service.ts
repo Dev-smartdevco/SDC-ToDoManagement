@@ -3,7 +3,7 @@ import { errors } from "../lib/httpError.js";
 import { assertCategoryForProject, categorySelect } from "../lib/category.js";
 
 const noteInclude = {
-  project: { select: { id: true, name: true, color: true } },
+  project: { select: { id: true, name: true, color: true, isDefault: true } },
   category: { select: categorySelect },
   task: { select: { id: true, title: true } },
 };
@@ -36,7 +36,7 @@ export async function listNotes(
         : undefined,
     },
     include: noteInclude,
-    orderBy: { updatedAt: "desc" },
+    orderBy: [{ project: { isDefault: "desc" } }, { updatedAt: "desc" }],
   });
 }
 

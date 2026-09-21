@@ -8,13 +8,14 @@ import { endpoints } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useScopedKey } from "@/lib/auth";
 import { addDaysIso, todayIso } from "@/lib/format";
+import { useDefaultProjectFilter } from "@/hooks/useDefaultProjectFilter";
 
 type CalTask = {
   id: string;
   title: string;
   dueDate: string | null;
   status: string;
-  project?: { name: string; color: string } | null;
+  project?: { name: string; color: string; isDefault?: boolean } | null;
   kind: "task";
 };
 type CalMeeting = {
@@ -30,10 +31,11 @@ export default function CalendarPage() {
   const { t } = useI18n();
   const [scope, setScope] = useState<"mine" | "team">("mine");
   const [status, setStatus] = useState("");
-  const [projectId, setProjectId] = useState("");
   const [memberId, setMemberId] = useState("");
   const from = todayIso();
   const to = addDaysIso(from, 21);
+  const projects = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects, staleTime: 5 * 60_000 });
+  const [projectId, setProjectId] = useDefaultProjectFilter(projects.data);
   const params = useMemo(() => {
     const p = new URLSearchParams({ from, to, scope });
     if (status) p.set("status", status);
@@ -41,7 +43,6 @@ export default function CalendarPage() {
     if (memberId) p.set("memberId", memberId);
     return p.toString();
   }, [from, to, scope, status, projectId, memberId]);
-  const projects = useQuery({ queryKey: useScopedKey(["projects"]), queryFn: endpoints.projects, staleTime: 5 * 60_000 });
   const directory = useQuery({
     queryKey: useScopedKey(["directory"]),
     queryFn: endpoints.directory,
@@ -75,7 +76,7 @@ export default function CalendarPage() {
           <option value="">{t("allProjects")}</option>
           {(projects.data ?? []).map((project) => (
             <option key={project.id} value={project.id}>
-              {project.name}
+              {project.isDefault ? `${project.name} ★` : project.name}
             </option>
           ))}
         </Select>

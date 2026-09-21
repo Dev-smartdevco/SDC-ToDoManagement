@@ -6,7 +6,7 @@ import { categoryStats } from "./categories.service.js";
 const OPEN_STATUSES = ["INBOX", "TODO", "IN_PROGRESS", "BLOCKED"] as const;
 
 const taskPreview = {
-  project: { select: { id: true, name: true, color: true, icon: true } },
+  project: { select: { id: true, name: true, color: true, icon: true, isDefault: true } },
   category: { select: { id: true, name: true, color: true, icon: true, projectId: true } },
   tags: { include: { tag: true } },
   subtasks: { select: { id: true, title: true, status: true }, orderBy: { sortOrder: "asc" } },
@@ -24,7 +24,7 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
         dueDate: date,
         status: { not: "CANCELLED" },
       },
-      orderBy: [{ sortOrder: "asc" }, { dueTime: "asc" }, { createdAt: "asc" }],
+      orderBy: [{ project: { isDefault: "desc" } }, { sortOrder: "asc" }, { dueTime: "asc" }, { createdAt: "desc" }],
       include: taskPreview,
     }),
     prisma.task.findMany({
@@ -34,7 +34,7 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
         status: { in: [...OPEN_STATUSES] },
         dueDate: { lt: date, not: null },
       },
-      orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }],
+      orderBy: [{ project: { isDefault: "desc" } }, { sortOrder: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
       take: 40,
       include: taskPreview,
     }),
@@ -45,7 +45,7 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
         status: { in: [...OPEN_STATUSES] },
         dueDate: { gt: date },
       },
-      orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }],
+      orderBy: [{ project: { isDefault: "desc" } }, { sortOrder: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
       take: 12,
       include: taskPreview,
     }),
@@ -118,6 +118,12 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
   }
 
   const mapTask = serializeTaggedTask;
+  const byDefaultThenOrder = <T extends { project?: { isDefault?: boolean } | null }>(tasks: T[]) =>
+    [...tasks].sort((a, b) => Number(Boolean(b.project?.isDefault)) - Number(Boolean(a.project?.isDefault)));
+
+  const plannedMapped = planned.map(mapTask);
+  const defaultPlanned = byDefaultThenOrder(plannedMapped.filter((task) => task.project?.isDefault));
+  const otherPlanned = plannedMapped.filter((task) => !task.project?.isDefault);
 
   return {
     date,
@@ -129,15 +135,18 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
     currentFocus: currentFocus ? mapTask(currentFocus) : null,
     activeFocus,
     todayTasks: {
-      high: planned.filter((t) => t.priority === "HIGH" || t.priority === "URGENT").map(mapTask),
-      normal: planned.filter((t) => t.priority === "MEDIUM").map(mapTask),
-      low: planned.filter((t) => t.priority === "LOW").map(mapTask),
+      default: defaultPlanned,
+      high: otherPlanned.filter((t) => t.priority === "HIGH" || t.priority === "URGENT"),
+      normal: otherPlanned.filter((t) => t.priority === "MEDIUM"),
+      low: otherPlanned.filter((t) => t.priority === "LOW"),
     },
-    overdue: overdueTasks.map((task) => ({
-      ...mapTask(task),
-      daysOverdue: Math.max(1, daysBetween(task.dueDate as string, date)),
-    })),
-    later: laterTasks.map(mapTask),
+    overdue: byDefaultThenOrder(
+      overdueTasks.map((task) => ({
+        ...mapTask(task),
+        daysOverdue: Math.max(1, daysBetween(task.dueDate as string, date)),
+      })),
+    ),
+    later: byDefaultThenOrder(laterTasks.map(mapTask)),
     timeBlocks,
   };
 }

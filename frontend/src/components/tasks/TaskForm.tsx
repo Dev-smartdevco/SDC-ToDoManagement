@@ -121,6 +121,18 @@ export function TaskForm({
     setValue(formFromTask(task));
   }, [task]);
 
+  useEffect(() => {
+    const editing = Boolean(task && "id" in task && task.id);
+    if (editing) return;
+    if (task?.projectId) return;
+    setValue((current) => {
+      if (current.projectId) return current;
+      const preferred = projects.find((p) => p.isDefault) ?? projects[0];
+      if (!preferred) return current;
+      return { ...current, projectId: preferred.id };
+    });
+  }, [projects, task]);
+
   const categoriesQuery = useQuery({
     queryKey: useScopedKey(["categories", value.projectId]),
     queryFn: () => endpoints.projectCategories(value.projectId),
@@ -187,7 +199,7 @@ export function TaskForm({
           <option value="">{t("project")}</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name}
+              {p.isDefault ? `${p.name} ★` : p.name}
             </option>
           ))}
         </select>

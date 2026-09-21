@@ -204,6 +204,8 @@ export const dictionaries = {
     goal: "Goal",
     allCaughtUp: "You're all caught up.",
     unreadCount: "{count} unread",
+    defaultProject: "Default",
+    setAsDefault: "Set as default",
   },
   ar: {
     appName: "MY OS",
@@ -408,6 +410,8 @@ export const dictionaries = {
     goal: "الهدف",
     allCaughtUp: "لا توجد إشعارات جديدة.",
     unreadCount: "{count} غير مقروء",
+    defaultProject: "افتراضي",
+    setAsDefault: "تعيين كافتراضي",
   },
 } as const;
 

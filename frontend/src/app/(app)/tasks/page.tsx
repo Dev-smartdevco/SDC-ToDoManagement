@@ -15,6 +15,7 @@ import { useI18n } from "@/lib/i18n";
 import { useToast } from "@/lib/toast";
 import type { Task } from "@/lib/types";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useDefaultProjectFilter } from "@/hooks/useDefaultProjectFilter";
 import { useScopedKey } from "@/lib/auth";
 import { keepPreviousData } from "@/lib/query";
 
@@ -26,7 +27,6 @@ export default function TasksPage() {
   const queryClient = useQueryClient();
   const [view, setView] = useState<(typeof views)[number]>("all");
   const [q, setQ] = useState("");
-  const [projectId, setProjectId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [priority, setPriority] = useState("");
   const [status, setStatus] = useState("");
@@ -35,6 +35,10 @@ export default function TasksPage() {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<Task | null>(null);
   const search = useDebouncedValue(q, 250);
+
+  const projectsScope = useScopedKey(["projects"]);
+  const projectsQuery = useQuery({ queryKey: projectsScope, queryFn: endpoints.projects, staleTime: 5 * 60_000 });
+  const [projectId, setProjectId] = useDefaultProjectFilter(projectsQuery.data);
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ view, limit: "50", date: todayIso() });
@@ -48,13 +52,11 @@ export default function TasksPage() {
   }, [view, search, projectId, categoryId, priority, status, dueDate]);
 
   const tasksScope = useScopedKey(["tasks"]);
-  const projectsScope = useScopedKey(["projects"]);
   const tasksQuery = useQuery({
     queryKey: useScopedKey(["tasks", params]),
     queryFn: () => endpoints.tasks(params),
     placeholderData: keepPreviousData,
   });
-  const projectsQuery = useQuery({ queryKey: projectsScope, queryFn: endpoints.projects, staleTime: 5 * 60_000 });
   const categoriesQuery = useQuery({
     queryKey: useScopedKey(["categories", projectId]),
     queryFn: () => endpoints.projectCategories(projectId),
@@ -133,7 +135,7 @@ export default function TasksPage() {
             <option value="">{t("project")}</option>
             {(projectsQuery.data ?? []).map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name}
+                {p.isDefault ? `${p.name} ★` : p.name}
               </option>
             ))}
           </Select>

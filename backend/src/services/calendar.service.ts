@@ -23,7 +23,7 @@ export async function calendar(
       where: {
         parentTaskId: null,
         dueDate: { gte: from, lte: to },
-        projectId: query.projectId,
+        projectId: query.projectId || undefined,
         status: query.status,
         AND: [
           access,
@@ -32,9 +32,9 @@ export async function calendar(
             : {},
         ],
       },
-      orderBy: [{ dueDate: "asc" }, { dueTime: "asc" }],
+      orderBy: [{ project: { isDefault: "desc" } }, { dueDate: "asc" }, { dueTime: "asc" }],
       include: {
-        project: { select: { id: true, name: true, color: true } },
+        project: { select: { id: true, name: true, color: true, isDefault: true } },
         assignees: { include: { user: { select: { id: true, name: true } } } },
       },
     }),
@@ -43,9 +43,10 @@ export async function calendar(
         date: { gte: from, lte: to },
         userId: query.scope === "team" ? query.memberId || undefined : actor.id,
         project: query.scope === "team" ? { AND: [projectAccessWhere(actor)] } : undefined,
+        projectId: query.projectId || undefined,
       },
-      orderBy: [{ date: "asc" }, { startTime: "asc" }],
-      include: { project: { select: { id: true, name: true, color: true } } },
+      orderBy: [{ project: { isDefault: "desc" } }, { date: "asc" }, { startTime: "asc" }],
+      include: { project: { select: { id: true, name: true, color: true, isDefault: true } } },
     }),
   ]);
 

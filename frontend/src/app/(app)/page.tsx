@@ -59,6 +59,7 @@ export default function TodayPage() {
         return {
           ...old,
           todayTasks: {
+            default: flip(old.todayTasks.default ?? []),
             high: flip(old.todayTasks.high),
             normal: flip(old.todayTasks.normal),
             low: flip(old.todayTasks.low),
@@ -138,16 +139,25 @@ export default function TodayPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [session, pauseFocus, resumeFocus]);
 
-  const groups = useMemo(
-    () => [
+  const groups = useMemo(() => {
+    const defaultItems = data?.todayTasks.default ?? [];
+    const defaultName = defaultItems[0]?.project?.name;
+    return [
+      defaultItems.length
+        ? { label: defaultName ? `${t("defaultProject")}: ${defaultName}` : t("defaultProject"), items: defaultItems }
+        : null,
       { label: t("highPriority"), items: data?.todayTasks.high ?? [] },
       { label: t("normal"), items: data?.todayTasks.normal ?? [] },
       { label: t("low"), items: data?.todayTasks.low ?? [] },
-    ],
-    [data, t],
-  );
+    ].filter((group): group is { label: string; items: Task[] } => Boolean(group?.items.length));
+  }, [data, t]);
 
-  const allToday = [...(data?.todayTasks.high ?? []), ...(data?.todayTasks.normal ?? []), ...(data?.todayTasks.low ?? [])];
+  const allToday = [
+    ...(data?.todayTasks.default ?? []),
+    ...(data?.todayTasks.high ?? []),
+    ...(data?.todayTasks.normal ?? []),
+    ...(data?.todayTasks.low ?? []),
+  ];
 
   if (todayQuery.isLoading) return <p className="text-sm text-muted">{t("loading")}</p>;
   if (todayQuery.isError) return <p className="text-sm text-danger">{t("error")}</p>;

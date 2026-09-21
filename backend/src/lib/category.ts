@@ -14,6 +14,7 @@ export const projectSelect = {
   name: true,
   color: true,
   icon: true,
+  isDefault: true,
 } as const;
 
 export const taskInclude = {
