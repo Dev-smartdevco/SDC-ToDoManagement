@@ -17,6 +17,7 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 const DEFAULT_ORIGINS = [
   "http://localhost:3000",
   "https://sdc-todomanagement.web.app",
+  'https://tasks.smartdevco.com',
   "https://sdc-todomanagement.firebaseapp.com",
 ];
 
