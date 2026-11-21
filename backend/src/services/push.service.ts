@@ -1,11 +1,31 @@
-import jwt from "jsonwebtoken";
+import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { getMessaging } from "firebase-admin/messaging";
 
 type ServiceAccount = { project_id: string; client_email: string; private_key: string };
 
-let cached: { token: string; exp: number } | null = null;
-
 export function firebaseConfigured() {
   return firebaseAccount() != null;
+}
+
+export function firebaseConfigError() {
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) return "FIREBASE_SERVICE_ACCOUNT is missing";
+  try {
+    const parsed = JSON.parse(raw) as ServiceAccount;
+    if (!parsed.project_id || !parsed.client_email || !parsed.private_key) return "FIREBASE_SERVICE_ACCOUNT is incomplete";
+    return null;
+  } catch {
+    return "FIREBASE_SERVICE_ACCOUNT is not valid JSON";
+  }
+}
+
+let configReported = false;
+
+export function reportFirebaseConfig() {
+  if (configReported) return;
+  configReported = true;
+  const error = firebaseConfigError();
+  if (error) console.error(`fcm.config ${error}`);
 }
 
 export function firebaseAccount(): ServiceAccount | null {
@@ -20,64 +40,68 @@ export function firebaseAccount(): ServiceAccount | null {
   }
 }
 
-async function accessToken(account: ServiceAccount) {
-  if (cached && cached.exp > Date.now() + 60_000) return cached.token;
-  const assertion = jwt.sign(
-    { scope: "https://www.googleapis.com/auth/firebase.messaging" },
-    account.private_key,
-    {
-      algorithm: "RS256",
-      issuer: account.client_email,
-      audience: "https://oauth2.googleapis.com/token",
-      expiresIn: "55m",
-    },
-  );
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion,
-    }),
-  });
-  if (!response.ok) throw new Error(`FCM auth failed (${response.status})`);
-  const json = (await response.json()) as { access_token: string; expires_in: number };
-  cached = { token: json.access_token, exp: Date.now() + json.expires_in * 1000 };
-  return json.access_token;
+export function isInvalidDeviceToken(code = "", message = "") {
+  const text = `${code} ${message}`.toUpperCase();
+  if (text.includes("UNREGISTERED") || text.includes("NOT_FOUND") || text.includes("REGISTRATION-TOKEN-NOT-REGISTERED")) return true;
+  if (text.includes("INVALID-REGISTRATION-TOKEN") || text.includes("INVALID_REGISTRATION")) return true;
+  if (text.includes("NOT A VALID FCM REGISTRATION TOKEN")) return true;
+  const invalidArgument = text.includes("INVALID_ARGUMENT") || text.includes("INVALID-ARGUMENT");
+  return invalidArgument && (text.includes("TOKEN") || text.includes("REGISTRATION"));
+}
+
+function publicError(message: string) {
+  return message.replace(/[A-Za-z0-9_.:-]{80,}/g, "[redacted]").slice(0, 240);
+}
+
+function messaging() {
+  const account = firebaseAccount();
+  if (!account) return null;
+  if (!getApps().length) {
+    initializeApp({
+      credential: cert({
+        projectId: account.project_id,
+        clientEmail: account.client_email,
+        privateKey: account.private_key,
+      }),
+    });
+  }
+  return getMessaging();
 }
 
 export async function sendFcm(token: string, payload: Record<string, string>, badge = 1) {
-  const account = firebaseAccount();
-  if (!account) return { ok: false as const, error: "FCM is not configured", invalid: false };
+  const client = messaging();
+  if (!client) return { ok: false as const, error: "FCM is not configured", invalid: false };
+  const preview = payload.lockScreenPreview === "false" ? "You have a new SDC-TASKS notification." : payload.body;
+  const sound = payload.sound === "false" ? undefined : "default";
   try {
-    const access = await accessToken(account);
-    const response = await fetch(`https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${access}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: {
-          token,
-          notification: {
-            title: payload.title,
-            body: payload.lockScreenPreview === "false" ? "You have a new MY OS notification." : payload.body,
-          },
-          data: payload,
-          android: {
-            priority: payload.priority === "High" ? "HIGH" : "NORMAL",
-            notification: { channel_id: "myos_alerts", sound: payload.sound === "false" ? undefined : "default" },
-          },
-          apns: {
-            headers: { "apns-priority": payload.priority === "High" ? "10" : "5" },
-            payload: { aps: { sound: payload.sound === "false" ? undefined : "default", badge } },
+    await client.send({
+      token,
+      notification: { title: payload.title, body: preview },
+      data: payload,
+      android: {
+        priority: payload.priority === "High" ? "high" : "normal",
+        notification: { channelId: "myos_alerts", sound },
+      },
+      apns: {
+        headers: {
+          "apns-priority": payload.priority === "High" ? "10" : "5",
+          "apns-push-type": "alert",
+        },
+        payload: {
+          aps: {
+            alert: { title: payload.title, body: preview },
+            sound,
+            badge,
           },
         },
-      }),
+      },
     });
-    if (response.ok) return { ok: true as const, error: null, invalid: false };
-    const text = await response.text();
-    const invalid = /UNREGISTERED|NOT_FOUND|INVALID_ARGUMENT/.test(text);
-    return { ok: false as const, error: text.slice(0, 400), invalid };
+    return { ok: true as const, error: null, invalid: false };
   } catch (error) {
-    return { ok: false as const, error: error instanceof Error ? error.message : "Push delivery failed", invalid: false };
+    const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+    const message = error instanceof Error ? error.message : "Push delivery failed";
+    const safe = publicError(`${code} ${message}`.trim());
+    console.error("fcm.send", safe);
+    return { ok: false as const, error: safe, invalid: isInvalidDeviceToken(code, message) };
   }
 }

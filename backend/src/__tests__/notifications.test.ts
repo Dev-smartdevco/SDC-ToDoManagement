@@ -2,13 +2,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../app.js";
 import { prisma } from "../lib/prisma.js";
-import { dispatchNotification } from "../services/notificationEngine.js";
+import { claimDelivery, dispatchNotification } from "../services/notificationEngine.js";
 
 const app = createApp();
 const password = "NotifyTest#2026";
 const email = `notify-${Date.now()}@smartdevco.test`;
 
 let adminToken = "";
+let adminId = "";
 let memberToken = "";
 let memberId = "";
 let projectId = "";
@@ -30,6 +31,7 @@ describe("notification system", () => {
       .send({ email: process.env.ADMIN_EMAIL ?? "admin@smartdevco.com", password: process.env.ADMIN_PASSWORD ?? "SmartDevCo@2026" });
     expect(login.status).toBe(200);
     adminToken = login.body.token;
+    adminId = login.body.user.id;
     const member = await request(app)
       .post("/api/users")
       .set("Authorization", `Bearer ${adminToken}`)
@@ -57,6 +59,55 @@ describe("notification system", () => {
       await prisma.scheduledReminder.deleteMany({ where: { userId: memberId } });
       await prisma.user.deleteMany({ where: { id: memberId } });
     }
+  });
+
+  it("does not notify the actor and notifies every other assignee once", async () => {
+    const otherEmail = `notify-other-${Date.now()}@smartdevco.test`;
+    const other = await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Nour Notify", email: otherEmail, password, role: "MEMBER" });
+    expect(other.status).toBe(201);
+    const otherId = other.body.id as string;
+    const created = await request(app)
+      .post("/api/tasks")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ title: "Shared assignment", projectId, assigneeIds: [memberId, otherId, adminId] });
+    expect(created.status).toBe(201);
+    const task = created.body.id as string;
+    const notes = await waitFor(async () => {
+      const rows = await prisma.notification.findMany({ where: { taskId: task, type: "TASK_CREATED" } });
+      return rows.length >= 2 ? rows : null;
+    });
+    expect(notes?.map((row) => row.userId).sort()).toEqual([memberId, otherId].sort());
+    await dispatchNotification({
+      userIds: [memberId, otherId, adminId],
+      type: "TASK_CREATED",
+      title: "New task assigned",
+      body: "Shared assignment",
+      actorId: adminId,
+      taskId: task,
+      eventId: `created:${task}`,
+    });
+    const again = await prisma.notification.count({ where: { taskId: task, type: "TASK_CREATED" } });
+    expect(again).toBe(2);
+
+    const comment = await request(app)
+      .post(`/api/tasks/${task}/comments`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ message: "Please review this" });
+    expect(comment.status).toBe(201);
+    const comments = await waitFor(async () => {
+      const rows = await prisma.notification.findMany({ where: { taskId: task, type: "COMMENT_ADDED" } });
+      return rows.length >= 2 ? rows : null;
+    });
+    expect(comments?.map((row) => row.userId).sort()).toEqual([memberId, otherId].sort());
+    expect(comments?.some((row) => row.userId === adminId)).toBe(false);
+
+    await prisma.notification.deleteMany({ where: { taskId: task } });
+    await prisma.task.deleteMany({ where: { id: task } });
+    await prisma.notification.deleteMany({ where: { userId: otherId } });
+    await prisma.user.deleteMany({ where: { id: otherId } });
   });
 
   it("creates a task notification for the assignee with a task deep link", async () => {
@@ -170,6 +221,105 @@ describe("notification system", () => {
     });
     const security = await prisma.notification.findFirst({ where: { eventId: `password-alert:${memberId}` } });
     expect(security?.type).toBe("PASSWORD_CHANGED");
+  });
+
+  it("registers, refreshes, and removes a device token for the signed-in user", async () => {
+    const token = `ios-token-${memberId}`;
+    const created = await request(app)
+      .post("/api/notifications/devices")
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ token, platform: "ios" });
+    expect(created.status).toBe(201);
+    expect(created.body.token).toBeUndefined();
+    const refreshed = await request(app)
+      .post("/api/notifications/devices")
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ token, platform: "IOS", name: "iPhone" });
+    expect(refreshed.status).toBe(201);
+    expect(refreshed.body.id).toBe(created.body.id);
+    const rows = await prisma.device.findMany({ where: { token } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.active).toBe(true);
+
+    const anonymous = await request(app).post("/api/notifications/devices").send({ token: "x", platform: "IOS" });
+    expect(anonymous.status).toBe(401);
+    const stolen = await request(app)
+      .delete("/api/notifications/devices")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ token });
+    expect(stolen.status).toBe(404);
+    const removed = await request(app)
+      .delete("/api/notifications/devices")
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ token });
+    expect(removed.status).toBe(200);
+    const after = await prisma.device.findUnique({ where: { token } });
+    expect(after?.active).toBe(false);
+  });
+
+  it("moves a rotated token to the account that registers it", async () => {
+    const token = `switch-token-${memberId}`;
+    const created = await request(app)
+      .post("/api/notifications/devices")
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ token, platform: "IOS" });
+    expect(created.status).toBe(201);
+    const moved = await request(app)
+      .post("/api/notifications/devices")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ token, platform: "IOS" });
+    expect(moved.status).toBe(201);
+    const row = await prisma.device.findUnique({ where: { token } });
+    expect(row?.userId).toBe(adminId);
+    expect(row?.active).toBe(true);
+    const denied = await request(app)
+      .delete("/api/notifications/devices")
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ token });
+    expect(denied.status).toBe(404);
+    const removed = await request(app)
+      .delete("/api/notifications/devices")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ token });
+    expect(removed.status).toBe(200);
+    expect((await prisma.device.findUnique({ where: { token } }))?.active).toBe(false);
+  });
+
+  it("lets only one worker claim a pending delivery", async () => {
+    const note = await prisma.notification.create({
+      data: {
+        userId: memberId,
+        type: "TASK_ASSIGNED",
+        title: "Claim",
+        body: "Claim",
+        eventId: `claim:${memberId}:${Date.now()}`,
+      },
+    });
+    const delivery = await prisma.notificationDelivery.create({
+      data: { notificationId: note.id, status: "PENDING", nextAttemptAt: new Date() },
+    });
+    const results = await Promise.all([claimDelivery(delivery.id), claimDelivery(delivery.id)]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(results.filter((value) => !value)).toHaveLength(1);
+    await prisma.notification.delete({ where: { id: note.id } });
+  });
+
+  it("keeps the delivery worker private and reports push configuration without secrets", async () => {
+    const health = await request(app).get("/api/health");
+    expect(health.status).toBe(200);
+    expect(typeof health.body.push).toBe("boolean");
+    expect(JSON.stringify(health.body)).not.toMatch(/private_key|BEGIN PRIVATE/);
+    const previous = process.env.CRON_SECRET;
+    delete process.env.CRON_SECRET;
+    const hidden = await request(app).get("/api/internal/notification-deliveries");
+    expect(hidden.status).toBe(404);
+    process.env.CRON_SECRET = "cron-test-secret";
+    const denied = await request(app)
+      .post("/api/internal/notification-deliveries")
+      .set("Authorization", "Bearer wrong");
+    expect(denied.status).toBe(404);
+    if (previous === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = previous;
   });
 
   it("does not let a user delete another user's device", async () => {

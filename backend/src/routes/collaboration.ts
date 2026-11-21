@@ -53,20 +53,26 @@ collaborationRouter.put(
   }),
 );
 
-collaborationRouter.post(
-  "/notifications/devices/register",
+const registerDevice = asyncHandler(async (req, res) => {
+  const platform = String(req.body?.platform ?? "").toUpperCase();
+  if (platform !== "ANDROID" && platform !== "IOS" && platform !== "WEB") {
+    res.status(400).json({ error: { message: "Platform must be ANDROID, IOS, or WEB." } });
+    return;
+  }
+  const data = await notificationsService.registerDevice((req as AuthRequest).actor, {
+    token: String(req.body?.token ?? ""),
+    platform,
+    name: typeof req.body?.name === "string" ? req.body.name : null,
+  });
+  res.status(201).json(data);
+});
+collaborationRouter.post("/notifications/devices", registerDevice);
+collaborationRouter.post("/notifications/devices/register", registerDevice);
+
+collaborationRouter.delete(
+  "/notifications/devices",
   asyncHandler(async (req, res) => {
-    const platform = String(req.body?.platform ?? "").toUpperCase();
-    if (platform !== "ANDROID" && platform !== "IOS" && platform !== "WEB") {
-      res.status(400).json({ error: { message: "Platform must be ANDROID, IOS, or WEB." } });
-      return;
-    }
-    const data = await notificationsService.registerDevice((req as AuthRequest).actor, {
-      token: String(req.body?.token ?? ""),
-      platform,
-      name: typeof req.body?.name === "string" ? req.body.name : null,
-    });
-    res.status(201).json(data);
+    res.json(await notificationsService.removeDeviceByToken((req as AuthRequest).actor, String(req.body?.token ?? "")));
   }),
 );
 

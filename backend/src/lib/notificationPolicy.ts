@@ -47,6 +47,51 @@ export function categoryFor(type: string) {
   return "System";
 }
 
+export function pushRoute(deepLink = "", taskId = "", projectId = "") {
+  if (taskId) return `task:${taskId}`;
+  if (projectId && deepLink.includes("/projects/")) return `project:${projectId}`;
+  if (deepLink.startsWith("myos://tasks/")) return `task:${deepLink.slice("myos://tasks/".length)}`;
+  if (deepLink.startsWith("myos://projects/")) return `project:${deepLink.slice("myos://projects/".length)}`;
+  if (deepLink.startsWith("myos://")) return deepLink;
+  return "notification";
+}
+
+export function fcmData(input: {
+  notificationId: string;
+  type: string;
+  category: string;
+  title: string;
+  body: string;
+  entityType?: string | null;
+  entityId?: string | null;
+  taskId?: string | null;
+  projectId?: string | null;
+  deepLink?: string | null;
+  priority: string;
+  sound: string;
+  lockScreenPreview: string;
+}) {
+  const taskId = input.taskId ?? "";
+  const projectId = input.projectId ?? "";
+  const deepLink = input.deepLink ?? "";
+  return {
+    notificationId: input.notificationId,
+    type: input.type,
+    category: input.category,
+    title: input.title,
+    body: input.body,
+    entityType: input.entityType ?? "",
+    entityId: input.entityId ?? "",
+    taskId,
+    projectId,
+    deepLink,
+    route: pushRoute(deepLink, taskId, projectId),
+    priority: input.priority,
+    sound: input.sound,
+    lockScreenPreview: input.lockScreenPreview,
+  };
+}
+
 export function deepLinkFor(entityType?: string | null, entityId?: string | null, taskId?: string | null, projectId?: string | null) {
   if (entityType === "Task" && entityId) return `myos://tasks/${entityId}`;
   if (entityType === "Project" && entityId) return `myos://projects/${entityId}`;
@@ -94,9 +139,29 @@ export function nextQuietEnd(now: Date, end: string, timeZone = "Africa/Cairo") 
   return new Date(now.getTime() + delta * 60_000);
 }
 
+export const maxPushAttempts = 6;
+
 export function retryDelayMs(attempt: number) {
-  const step = Math.min(attempt, 6);
-  return Math.min(60 * 60_000, 15_000 * 2 ** step);
+  const step = Math.min(Math.max(attempt, 1), 6);
+  return Math.min(60 * 60_000, 15_000 * 2 ** (step - 1));
+}
+
+export function deliveryOutcome(input: { ok: boolean; invalid: boolean; error?: string | null; attempts: number }) {
+  if (input.ok) return { status: "SENT" as const, deactivate: false, delayMs: 0, error: null };
+  const attempts = input.attempts + 1;
+  if (input.invalid) {
+    return { status: "DEAD" as const, deactivate: true, delayMs: 0, error: input.error ?? "Invalid device token", attempts };
+  }
+  if (attempts >= maxPushAttempts) {
+    return { status: "DEAD" as const, deactivate: false, delayMs: 0, error: input.error ?? "Push delivery failed", attempts };
+  }
+  return {
+    status: "PENDING" as const,
+    deactivate: false,
+    delayMs: retryDelayMs(attempts),
+    error: input.error ?? "Push delivery failed",
+    attempts,
+  };
 }
 
 function minutes(value: string) {

@@ -4,7 +4,6 @@ import { errors } from "../lib/httpError.js";
 import type { Actor } from "../lib/access.js";
 import { DEFAULT_CATEGORIES, DEFAULT_REMINDERS } from "../lib/notificationPolicy.js";
 import { pageResult, pageWindow } from "../lib/paging.js";
-import { dispatchNotification } from "./notificationEngine.js";
 
 export async function listNotifications(
   actor: Actor,
@@ -125,7 +124,7 @@ export async function registerDevice(
   input: { token: string; platform: DevicePlatform; name?: string | null },
 ) {
   const token = input.token.trim();
-  if (!token) throw errors.badRequest("Device token is required.");
+  if (!token || token.length > 4096) throw errors.badRequest("Device token is required.");
   const existing = await prisma.device.findUnique({ where: { token } });
   const device = existing
     ? await prisma.device.update({
@@ -135,16 +134,6 @@ export async function registerDevice(
     : await prisma.device.create({
         data: { userId: actor.id, token, platform: input.platform, name: input.name ?? null },
       });
-  if (!existing) {
-    await dispatchNotification({
-      userIds: [actor.id],
-      type: "DEVICE_REGISTERED",
-      title: "Device registered",
-      body: `${input.platform} can now receive MY OS alerts.`,
-      eventId: `device:${device.id}`,
-      priority: "Low",
-    });
-  }
   return { id: device.id, platform: device.platform, name: device.name, active: device.active };
 }
 
@@ -152,6 +141,16 @@ export async function removeDevice(actor: Actor, id: string) {
   const device = await prisma.device.findFirst({ where: { id, userId: actor.id } });
   if (!device) throw errors.notFound("Device");
   await prisma.device.update({ where: { id }, data: { active: false } });
+  return { ok: true };
+}
+
+export async function removeDeviceByToken(actor: Actor, token: string) {
+  const value = token.trim();
+  if (!value || value.length > 4096) throw errors.badRequest("Device token is required.");
+  const device = await prisma.device.findUnique({ where: { token: value } });
+  if (!device) return { ok: true };
+  if (device.userId !== actor.id) throw errors.notFound("Device");
+  await prisma.device.update({ where: { id: device.id }, data: { active: false } });
   return { ok: true };
 }
 

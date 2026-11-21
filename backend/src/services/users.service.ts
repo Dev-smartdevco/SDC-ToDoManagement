@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import type { UserRole } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { errors } from "../lib/httpError.js";
-import { assertAdmin, invalidateActor, isAdmin, type Actor } from "../lib/access.js";
+import { assertAdmin, invalidateActor, type Actor } from "../lib/access.js";
 import { recordActivity } from "../lib/events.js";
 import { levelFromXp } from "../lib/xp.js";
 
@@ -80,38 +80,11 @@ export async function listUsers(
   });
 }
 
-export async function directory(actor: Actor) {
-  if (isAdmin(actor)) {
-    return prisma.user.findMany({
-      where: { isActive: true },
-      select: { id: true, name: true, email: true, role: true },
-      orderBy: { name: "asc" },
-      take: 100,
-    });
-  }
-  const memberships = await prisma.projectMember.findMany({
-    where: { userId: actor.id },
-    select: { projectId: true },
+export async function directory(_actor: Actor) {
+  return prisma.user.findMany({
+    select: { id: true, name: true, email: true, role: true, isActive: true },
+    orderBy: [{ isActive: "desc" }, { name: "asc" }],
   });
-  const owned = await prisma.project.findMany({
-    where: { userId: actor.id },
-    select: { id: true },
-  });
-  const projectIds = [...new Set([...memberships.map((m) => m.projectId), ...owned.map((p) => p.id)])];
-  const members = projectIds.length
-    ? await prisma.projectMember.findMany({
-        where: { projectId: { in: projectIds } },
-        select: { user: { select: { id: true, name: true, email: true, role: true } } },
-      })
-    : [];
-  const self = await prisma.user.findUnique({
-    where: { id: actor.id },
-    select: { id: true, name: true, email: true, role: true },
-  });
-  const map = new Map<string, { id: string; name: string; email: string; role: UserRole }>();
-  if (self) map.set(self.id, self);
-  for (const row of members) map.set(row.user.id, row.user);
-  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function getUser(actor: Actor, id: string) {

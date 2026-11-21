@@ -13,6 +13,7 @@ import { categoriesRouter } from "./routes/categories.js";
 import { usersRouter } from "./routes/users.js";
 import { collaborationRouter } from "./routes/collaboration.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
+import { firebaseConfigError, firebaseConfigured, reportFirebaseConfig } from "./services/push.service.js";
 
 const DEFAULT_ORIGINS = [
   "http://localhost:3000",
@@ -46,8 +47,22 @@ export function createApp() {
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/api/health", (_req, res) => {
-    res.json({ ok: true, name: "MY OS API" });
+    res.json({ ok: true, name: "MY OS API", push: firebaseConfigured(), pushError: firebaseConfigError() });
   });
+
+  const runDeliveryWorker = async (req: express.Request, res: express.Response) => {
+    const secret = process.env.CRON_SECRET;
+    const header = req.header("authorization") ?? "";
+    if (!secret || header !== `Bearer ${secret}`) {
+      res.status(404).json({ error: { message: "Not found" } });
+      return;
+    }
+    const { processDeliveryQueue } = await import("./services/notificationEngine.js");
+    const processed = await processDeliveryQueue();
+    res.json({ ok: true, processed });
+  };
+  app.get("/api/internal/notification-deliveries", runDeliveryWorker);
+  app.post("/api/internal/notification-deliveries", runDeliveryWorker);
 
   app.use("/api/auth", authRouter);
   app.use("/api/users", usersRouter);
@@ -61,6 +76,7 @@ export function createApp() {
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api", collaborationRouter);
 
+  reportFirebaseConfig();
   app.use(notFoundHandler);
   app.use(errorHandler);
   return app;

@@ -3,6 +3,12 @@
   "framework": null,
   "installCommand": "npm install && npx prisma generate",
   "outputDirectory": "public",
+  "crons": [
+    {
+      "path": "/api/internal/notification-deliveries",
+      "schedule": "*/5 * * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",

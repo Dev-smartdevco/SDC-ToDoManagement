@@ -60,7 +60,10 @@ export const taskSchema = z.object({
     )
     .max(50)
     .optional(),
-  assigneeIds: z.array(z.string().uuid()).max(20).optional(),
+  assigneeIds: z.preprocess((value) => {
+    if (!Array.isArray(value)) return value;
+    return value.filter((item) => typeof item === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item));
+  }, z.array(z.string().uuid()).max(20).optional()),
   blockedReason: z.string().trim().max(500).optional().nullable(),
   actualMinutes: z.number().int().min(0).max(24 * 60 * 30).optional().nullable(),
 });

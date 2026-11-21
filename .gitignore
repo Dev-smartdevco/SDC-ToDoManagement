@@ -14,4 +14,6 @@ frontend/.turbo
 .vscode
 .idea
 .firebase
+*serviceAccount*.json
+*firebase-adminsdk*.json
 frontend/out

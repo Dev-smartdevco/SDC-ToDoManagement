@@ -178,11 +178,14 @@ async function cascadeParentStatus(userId: string, parentId: string, status: Tas
 }
 
 async function syncAssignees(taskId: string, ownerId: string, ids?: string[]) {
-  const unique = [...new Set([ownerId, ...(ids ?? [])])];
+  const unique = [...new Set(ids ?? [ownerId])].filter((id) => id.length > 0);
   await prisma.taskAssignee.deleteMany({ where: { taskId } });
-  await prisma.taskAssignee.createMany({
-    data: unique.map((userId) => ({ taskId, userId, isPrimary: userId === ownerId })),
-  });
+  if (unique.length) {
+    const primary = unique.includes(ownerId) ? ownerId : unique[0];
+    await prisma.taskAssignee.createMany({
+      data: unique.map((userId) => ({ taskId, userId, isPrimary: userId === primary })),
+    });
+  }
   return unique;
 }
 

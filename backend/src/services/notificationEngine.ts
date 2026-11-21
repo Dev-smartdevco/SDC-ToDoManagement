@@ -8,10 +8,11 @@ import {
   allowsPush,
   categoryFor,
   deepLinkFor,
+  deliveryOutcome,
+  fcmData,
   isSecurity,
   nextQuietEnd,
   quietHoursActive,
-  retryDelayMs,
 } from "../lib/notificationPolicy.js";
 import { sendFcm } from "./push.service.js";
 
@@ -84,19 +85,26 @@ export async function dispatchNotification(input: NotifyInput) {
           metadata: input.metadata,
         },
       });
-      await queuePush(saved.id, userId, prefs, {
-        notificationId: saved.id,
-        type: input.type,
-        category,
-        title: input.title,
-        body: input.body,
-        entityType: entityType ?? "",
-        entityId: entityId ?? "",
-        deepLink,
-        priority: saved.priority,
-        sound: prefs.sound ? "true" : "false",
-        lockScreenPreview: prefs.lockScreenPreview ? "true" : "false",
-      });
+      await queuePush(
+        saved.id,
+        userId,
+        prefs,
+        fcmData({
+          notificationId: saved.id,
+          type: input.type,
+          category,
+          title: input.title,
+          body: input.body,
+          entityType,
+          entityId,
+          taskId: input.taskId,
+          projectId: input.projectId,
+          deepLink,
+          priority: saved.priority,
+          sound: prefs.sound ? "true" : "false",
+          lockScreenPreview: prefs.lockScreenPreview ? "true" : "false",
+        }),
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       if (!message.includes("Unique constraint")) {
@@ -123,71 +131,107 @@ async function queuePush(notificationId: string, userId: string, prefs: Awaited<
   }
   const unread = await prisma.notification.count({ where: { userId, readAt: null } });
   for (const device of devices) {
-    const delivery = await prisma.notificationDelivery.create({
-      data: {
-        notificationId,
-        deviceId: device.id,
-        status: quiet ? "PENDING" : "PENDING",
-        nextAttemptAt: quiet && prefs.quietEnd ? nextQuietEnd(new Date(), prefs.quietEnd, prefs.timeZone) : new Date(),
-      },
-    });
-    if (!quiet) await attemptDelivery(delivery.id, device.token, device.id, data, unread);
+    try {
+      const delivery = await prisma.notificationDelivery.create({
+        data: {
+          notificationId,
+          deviceId: device.id,
+          status: "PENDING",
+          nextAttemptAt: quiet && prefs.quietEnd ? nextQuietEnd(new Date(), prefs.quietEnd, prefs.timeZone) : new Date(),
+        },
+      });
+      if (!quiet) await attemptDelivery(delivery.id, device.token, device.id, data, unread);
+    } catch (error) {
+      console.error("notification.device", error instanceof Error ? error.message : "Push delivery failed");
+    }
   }
 }
 
 export async function attemptDelivery(deliveryId: string, token: string, deviceId: string, data: Record<string, string>, badge: number) {
-  const result = await sendFcm(token, data, badge);
-  if (result.ok) {
-    await prisma.notificationDelivery.update({ where: { id: deliveryId }, data: { status: "SENT", lastError: null } });
-    return;
+  const current = await prisma.notificationDelivery.findUnique({ where: { id: deliveryId }, select: { attempts: true } });
+  let result: { ok: boolean; invalid: boolean; error: string | null };
+  try {
+    result = await sendFcm(token, data, badge);
+  } catch (error) {
+    result = { ok: false, invalid: false, error: error instanceof Error ? error.message : "Push delivery failed" };
   }
-  if (result.invalid) {
+  const outcome = deliveryOutcome({ ...result, attempts: current?.attempts ?? 0 });
+  if (outcome.deactivate) {
     await prisma.device.update({ where: { id: deviceId }, data: { active: false } });
-    await prisma.notificationDelivery.update({
-      where: { id: deliveryId },
-      data: { status: "DEAD", attempts: { increment: 1 }, lastError: result.error },
-    });
-    return;
   }
-  const current = await prisma.notificationDelivery.findUnique({ where: { id: deliveryId } });
-  const attempts = (current?.attempts ?? 0) + 1;
   await prisma.notificationDelivery.update({
     where: { id: deliveryId },
     data: {
-      status: attempts >= 6 ? "DEAD" : "PENDING",
-      attempts,
-      lastError: result.error,
-      nextAttemptAt: new Date(Date.now() + retryDelayMs(attempts)),
+      status: outcome.status,
+      attempts: outcome.status === "SENT" ? current?.attempts ?? 0 : outcome.attempts,
+      lastError: outcome.error,
+      nextAttemptAt: outcome.status === "PENDING" ? new Date(Date.now() + outcome.delayMs) : undefined,
     },
   });
 }
 
+export async function claimDelivery(id: string) {
+  const claimed = await prisma.notificationDelivery.updateMany({
+    where: { id, status: "PENDING" },
+    data: { status: "PROCESSING" },
+  });
+  return claimed.count === 1;
+}
+
 export async function processDeliveryQueue() {
+  const staleBefore = new Date(Date.now() - 2 * 60_000);
+  await prisma.notificationDelivery.updateMany({
+    where: { status: "PROCESSING", updatedAt: { lt: staleBefore } },
+    data: { status: "PENDING" },
+  });
   const due = await prisma.notificationDelivery.findMany({
     where: { status: "PENDING", nextAttemptAt: { lte: new Date() }, deviceId: { not: null } },
+    orderBy: { nextAttemptAt: "asc" },
     take: 40,
     include: { notification: true },
   });
+  let processed = 0;
   for (const row of due) {
     if (!row.deviceId) continue;
+    if (!(await claimDelivery(row.id))) continue;
+    processed += 1;
     const device = await prisma.device.findUnique({ where: { id: row.deviceId } });
     if (!device || !device.active) {
       await prisma.notificationDelivery.update({ where: { id: row.id }, data: { status: "DEAD", lastError: "Device inactive" } });
       continue;
     }
     const unread = await prisma.notification.count({ where: { userId: row.notification.userId, readAt: null } });
-    await attemptDelivery(row.id, device.token, device.id, {
-      notificationId: row.notification.id,
-      type: row.notification.type,
-      category: row.notification.category,
-      title: row.notification.title,
-      body: row.notification.body,
-      entityType: row.notification.entityType ?? "",
-      entityId: row.notification.entityId ?? "",
-      deepLink: row.notification.deepLink ?? "",
-      priority: row.notification.priority,
-    }, unread);
+    try {
+      await attemptDelivery(
+        row.id,
+        device.token,
+        device.id,
+        fcmData({
+          notificationId: row.notification.id,
+          type: row.notification.type,
+          category: row.notification.category,
+          title: row.notification.title,
+          body: row.notification.body,
+          entityType: row.notification.entityType,
+          entityId: row.notification.entityId,
+          taskId: row.notification.taskId,
+          projectId: row.notification.projectId,
+          deepLink: row.notification.deepLink,
+          priority: row.notification.priority,
+          sound: "true",
+          lockScreenPreview: "true",
+        }),
+        unread,
+      );
+    } catch (error) {
+      console.error("notification.retry", error instanceof Error ? error.message : "Push delivery failed");
+      await prisma.notificationDelivery.update({
+        where: { id: row.id },
+        data: { status: "PENDING", nextAttemptAt: new Date(Date.now() + 60_000), lastError: "Retry failed" },
+      });
+    }
   }
+  return processed;
 }
 
 export async function scheduleReminder(input: {

@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Priority, Project, Task, TaskStatus } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 import { endpoints } from "@/lib/api";
-import { useScopedKey } from "@/lib/auth";
+import { useAuth, useScopedKey } from "@/lib/auth";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 
 const field =
@@ -87,7 +87,9 @@ export function taskPayload(value: TaskFormValue) {
     dueTime: value.dueTime || null,
     estimatedMinutes: value.estimatedMinutes ? Number(value.estimatedMinutes) : null,
     description: value.description || null,
-    assigneeIds: value.assigneeIds,
+    assigneeIds: value.assigneeIds.filter((id) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id),
+    ),
     blockedReason: value.status === "BLOCKED" ? value.blockedReason || null : null,
     subtasks: value.checklist
       .filter((item) => item.title.trim())
@@ -115,11 +117,17 @@ export function TaskForm({
   autoFocus?: boolean;
 }) {
   const { t } = useI18n();
+  const { user } = useAuth();
   const [value, setValue] = useState<TaskFormValue>(() => formFromTask(task));
 
   useEffect(() => {
     setValue(formFromTask(task));
   }, [task]);
+
+  useEffect(() => {
+    if (task?.id || !user?.id) return;
+    setValue((current) => (current.assigneeIds.length ? current : { ...current, assigneeIds: [user.id] }));
+  }, [task?.id, user?.id]);
 
   useEffect(() => {
     const editing = Boolean(task && "id" in task && task.id);
