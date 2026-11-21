@@ -1,0 +1,72 @@
+# Retries pending push deliveries on the Vercel Hobby plan.
+# GitHub schedules are best-effort and can start late. This does not
+# guarantee a run every five minutes.
+#
+# The first delivery still happens inside the task request. This workflow
+# only calls the existing retry endpoint.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   BACKEND_URL  Production origin, without a path.
+#                Example: https://sdc-to-do-management-three.vercel.app
+#   CRON_SECRET  The same value as the backend CRON_SECRET environment variable.
+#
+# After this file is on the default branch, open the Actions tab and enable
+# "Notification delivery retry" if GitHub has left it disabled.
+
+name: Notification delivery retry
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: notification-delivery-retry
+  cancel-in-progress: false
+
+permissions:
+  contents: none
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Call the delivery retry endpoint
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKEND_URL}" ]; then
+            echo "BACKEND_URL secret is missing."
+            exit 1
+          fi
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "CRON_SECRET secret is missing."
+            exit 1
+          fi
+          endpoint="${BACKEND_URL%/}/api/internal/notification-deliveries"
+          tmp="$(mktemp)"
+          set +e
+          code="$(curl --silent --show-error --output "$tmp" --write-out "%{http_code}" \
+            --connect-timeout 10 \
+            --max-time 25 \
+            --retry 0 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "Accept: application/json" \
+            "$endpoint")"
+          curl_status=$?
+          set -e
+          body="$(cat "$tmp" 2>/dev/null || true)"
+          rm -f "$tmp"
+          body="${body//${CRON_SECRET}/[redacted]}"
+          if [ "$curl_status" -ne 0 ] || [ "$code" != "200" ]; then
+            echo "Notification retry failed (curl ${curl_status}, HTTP ${code:-none})."
+            echo "Endpoint: ${endpoint}"
+            if [ -n "$body" ]; then
+              echo "Response: ${body}"
+            fi
+            exit 1
+          fi
+          echo "Notification retry completed: ${body}"
