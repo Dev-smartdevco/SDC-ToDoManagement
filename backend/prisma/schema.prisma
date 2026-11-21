@@ -1,6 +1,7 @@
 generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
+  binaryTargets   = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -74,6 +75,67 @@ enum NotificationType {
   DEADLINE_SOON
   TASK_COMPLETED
   RECOGNITION
+  TASK_REASSIGNED
+  TASK_UNASSIGNED
+  TASK_CREATED
+  TASK_UPDATED
+  TASK_DUE_DATE_CHANGED
+  TASK_PRIORITY_CHANGED
+  TASK_STATUS_CHANGED
+  TASK_REOPENED
+  TASK_DELETED
+  TASK_OVERDUE
+  TASK_REMINDER
+  TASK_BLOCKED
+  TASK_UNBLOCKED
+  TASK_MENTIONED
+  TASK_COMMENT_REPLIED
+  TASK_ATTACHMENT_ADDED
+  TASK_CHECKLIST_UPDATED
+  PROJECT_MEMBER_REMOVED
+  PROJECT_CREATED
+  PROJECT_UPDATED
+  PROJECT_STATUS_CHANGED
+  PROJECT_DEADLINE
+  PROJECT_COMPLETED
+  PROJECT_ARCHIVED
+  TEAM_MEMBER_JOINED
+  TEAM_MEMBER_ASSIGNED
+  TEAM_TASK_COMPLETED
+  TEAM_MEMBER_BLOCKED
+  TEAM_ACTIVITY
+  MEETING_INVITATION
+  MEETING_UPDATED
+  MEETING_CANCELLED
+  MEETING_REMINDER
+  MEETING_STARTING
+  NOTE_SHARED
+  NOTE_UPDATED
+  NOTE_MENTIONED
+  NOTE_COMMENT
+  REWARD_RECEIVED
+  LEVEL_UP
+  ACHIEVEMENT_UNLOCKED
+  STREAK
+  DAILY_PLAN
+  START_OF_DAY
+  END_OF_DAY
+  WEEKLY_REVIEW
+  INCOMPLETE_TASKS
+  FOCUS_COMPLETED
+  NEW_DEVICE_LOGIN
+  PASSWORD_CHANGED
+  SUSPICIOUS_LOGIN
+  DEVICE_REGISTERED
+  SYSTEM_ANNOUNCEMENT
+  SYSTEM_MAINTENANCE
+  SYNC_ERROR
+}
+
+enum DevicePlatform {
+  ANDROID
+  IOS
+  WEB
 }
 
 enum RecognitionVisibility {
@@ -124,6 +186,8 @@ model User {
   comments             TaskComment[]
   activities           ActivityLog[]      @relation("ActivityActor")
   notifications        Notification[]
+  devices              Device[]
+  preference           NotificationPreference?
   userAchievements     UserAchievement[]
   recognitionsGiven    Recognition[]      @relation("RecognitionAuthor")
   recognitionsReceived Recognition[]      @relation("RecognitionRecipient")
@@ -233,6 +297,10 @@ model Task {
   @@index([userId, dueDate])
   @@index([userId, projectId])
   @@index([userId, sortOrder])
+  @@index([userId, parentTaskId, dueDate])
+  @@index([userId, parentTaskId, status, dueDate])
+  @@index([projectId, status, createdAt])
+  @@index([userId, createdAt])
   @@index([categoryId])
   @@index([parentTaskId])
   @@index([status, dueDate])
@@ -280,22 +348,102 @@ model ActivityLog {
   @@index([createdAt])
   @@index([projectId, createdAt])
   @@index([taskId, createdAt])
+  @@index([userId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model Notification {
-  id        String           @id @default(uuid())
-  userId    String
-  type      NotificationType
-  title     String
-  body      String
-  readAt    DateTime?
-  taskId    String?
-  projectId String?
-  actorId   String?
-  createdAt DateTime         @default(now())
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String           @id @default(uuid())
+  userId      String
+  type        NotificationType
+  category    String           @default("System")
+  title       String
+  body        String
+  readAt      DateTime?
+  taskId      String?
+  projectId   String?
+  actorId     String?
+  entityType  String?
+  entityId    String?
+  deepLink    String?
+  priority    String           @default("Normal")
+  eventId     String?          @unique
+  metadata    Json?
+  expiresAt   DateTime?
+  createdAt   DateTime         @default(now())
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries  NotificationDelivery[]
 
   @@index([userId, readAt, createdAt])
+  @@index([userId, category, createdAt])
+}
+
+model Device {
+  id         String         @id @default(uuid())
+  userId     String
+  token      String         @unique
+  platform   DevicePlatform
+  name       String?
+  active     Boolean        @default(true)
+  lastSeenAt DateTime       @default(now())
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, active])
+}
+
+model NotificationPreference {
+  userId             String   @id
+  pushEnabled        Boolean  @default(true)
+  inAppEnabled       Boolean  @default(true)
+  sound              Boolean  @default(true)
+  vibration          Boolean  @default(true)
+  quietStart         String?
+  quietEnd           String?
+  timeZone           String   @default("Africa/Cairo")
+  lockScreenPreview  Boolean  @default(true)
+  categories         Json
+  reminders          Json
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model NotificationDelivery {
+  id             String       @id @default(uuid())
+  notificationId String
+  deviceId       String?
+  status         String       @default("PENDING")
+  attempts       Int          @default(0)
+  nextAttemptAt  DateTime     @default(now())
+  lastError      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([notificationId])
+}
+
+model ScheduledReminder {
+  id          String           @id @default(uuid())
+  eventId     String           @unique
+  userId      String
+  type        NotificationType
+  title       String
+  body        String
+  fireAt      DateTime
+  taskId      String?
+  projectId   String?
+  entityType  String?
+  entityId    String?
+  deepLink    String?
+  cancelled   Boolean          @default(false)
+  sent        Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  @@index([fireAt, sent, cancelled])
+  @@index([taskId])
 }
 
 model Achievement {
@@ -378,6 +526,7 @@ model Note {
   categoryId String?
   taskId     String?
   tags       String[]  @default([])
+  sharedWith String[]  @default([])
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -386,6 +535,7 @@ model Note {
   task       Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   @@index([userId, projectId])
+  @@index([userId, updatedAt])
   @@index([categoryId])
 }
 
@@ -398,7 +548,8 @@ model TimeBlock {
   date      String
   startTime String
   endTime   String
-  notes     String?
+  notes          String?
+  participantIds String[] @default([])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

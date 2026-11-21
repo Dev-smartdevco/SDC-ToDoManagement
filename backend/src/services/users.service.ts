@@ -39,7 +39,8 @@ export async function listUsers(
         : undefined,
     },
     select: listSelect,
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: 100,
   });
 
   if (!users.length) return [];
@@ -85,6 +86,7 @@ export async function directory(actor: Actor) {
       where: { isActive: true },
       select: { id: true, name: true, email: true, role: true },
       orderBy: { name: "asc" },
+      take: 100,
     });
   }
   const memberships = await prisma.projectMember.findMany({

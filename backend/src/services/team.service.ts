@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma.js";
 import { isAdmin, projectAccessWhere, publicUserSelect, taskAccessWhere, type Actor } from "../lib/access.js";
+import { pageResult, pageWindow } from "../lib/paging.js";
 import { subtractDaysIso, todayIso, weekDates } from "../lib/dates.js";
 
 const OPEN = ["INBOX", "TODO", "IN_PROGRESS", "BLOCKED"] as const;
@@ -103,20 +104,31 @@ export async function teamDashboard(actor: Actor, date = todayIso()) {
   };
 }
 
-export async function listActivity(actor: Actor, query: { projectId?: string; taskId?: string }) {
+export async function listActivity(
+  actor: Actor,
+  query: { projectId?: string; taskId?: string; page?: number; limit?: number; pageSize?: number },
+) {
+  const { page, pageSize, skip } = pageWindow(query);
   const access = isAdmin(actor)
     ? {}
     : {
         OR: [{ actorId: actor.id }, { userId: actor.id }, { project: projectAccessWhere(actor) }],
       };
-  return prisma.activityLog.findMany({
-    where: {
-      projectId: query.projectId,
-      taskId: query.taskId,
-      AND: [access],
-    },
-    include: { actor: { select: publicUserSelect } },
-    orderBy: { createdAt: "desc" },
-    take: 80,
-  });
+  const where = {
+    projectId: query.projectId,
+    taskId: query.taskId,
+    AND: [access],
+  };
+  const [items, total] = await Promise.all([
+    prisma.activityLog.findMany({
+      where,
+      relationLoadStrategy: "join",
+      include: { actor: { select: publicUserSelect } },
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      skip,
+      take: pageSize,
+    }),
+    prisma.activityLog.count({ where }),
+  ]);
+  return pageResult(items, total, page, pageSize);
 }

@@ -3,19 +3,31 @@ import { prisma } from "../lib/prisma.js";
 import { errors } from "../lib/httpError.js";
 import { assertAdmin, assertWrite, getAccessibleProject, publicUserSelect, type Actor } from "../lib/access.js";
 import { actorName, notifyUsers, recordActivity } from "../lib/events.js";
+import { pageResult, pageWindow } from "../lib/paging.js";
 
-export async function listRecognition(actor: Actor, projectId?: string) {
-  return prisma.recognition.findMany({
-    where: projectId ? { projectId } : {},
-    include: {
-      author: { select: publicUserSelect },
-      recipient: { select: publicUserSelect },
-      project: { select: { id: true, name: true, color: true } },
-      task: { select: { id: true, title: true } },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
+export async function listRecognition(
+  _actor: Actor,
+  query: { projectId?: string; page?: number; limit?: number; pageSize?: number } = {},
+) {
+  const { page, pageSize, skip } = pageWindow(query);
+  const where = { projectId: query.projectId || undefined };
+  const [items, total] = await Promise.all([
+    prisma.recognition.findMany({
+      where,
+      relationLoadStrategy: "join",
+      include: {
+        author: { select: publicUserSelect },
+        recipient: { select: publicUserSelect },
+        project: { select: { id: true, name: true, color: true } },
+        task: { select: { id: true, title: true } },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      skip,
+      take: pageSize,
+    }),
+    prisma.recognition.count({ where }),
+  ]);
+  return pageResult(items, total, page, pageSize);
 }
 
 export async function createRecognition(

@@ -1,6 +1,7 @@
 import type { ActivityType, NotificationType, Prisma } from "@prisma/client";
 import { prisma } from "./prisma.js";
 import type { Actor } from "./access.js";
+import { dispatchNotification } from "../services/notificationEngine.js";
 
 export async function recordActivity(input: {
   type: ActivityType;
@@ -36,23 +37,16 @@ export async function notifyUsers(input: {
   actorId?: string;
   taskId?: string | null;
   projectId?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  priority?: "Low" | "Normal" | "High";
+  eventId?: string;
+  metadata?: Prisma.InputJsonValue;
 }) {
-  const unique = [...new Set(input.userIds)].filter((id) => id && id !== input.actorId);
-  if (!unique.length) return;
   try {
-    await prisma.notification.createMany({
-      data: unique.map((userId) => ({
-        userId,
-        type: input.type,
-        title: input.title,
-        body: input.body,
-        actorId: input.actorId ?? null,
-        taskId: input.taskId ?? null,
-        projectId: input.projectId ?? null,
-      })),
-    });
-  } catch {
-    return;
+    await dispatchNotification(input);
+  } catch (error) {
+    console.error("notifyUsers", error instanceof Error ? error.message : error);
   }
 }
 

@@ -22,12 +22,22 @@ const DEFAULT_ORIGINS = [
 ];
 
 function corsOrigin() {
-  const allowed = [
+  const allowed = new Set([
     ...DEFAULT_ORIGINS,
     ...env.clientOrigin.split(",").map((value) => value.trim()).filter(Boolean),
-  ];
-  if (allowed.includes("*")) return true;
-  return [...new Set(allowed)];
+  ]);
+  if (allowed.has("*")) return true;
+  return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin || allowed.has(origin)) {
+      callback(null, true);
+      return;
+    }
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(null, false);
+  };
 }
 
 export function createApp() {

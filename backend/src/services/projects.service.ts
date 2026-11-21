@@ -18,6 +18,7 @@ import {
   type Actor,
 } from "../lib/access.js";
 import { onProjectCompleted } from "./rewards.service.js";
+import { pageResult, pageWindow } from "../lib/paging.js";
 
 const taskPreviewInclude = {
   project: { select: projectSelect },
@@ -36,11 +37,15 @@ function serializeTask<
   return withNestedProjectDefaultFlag(serializeTaggedTask(task), defaultProjectId);
 }
 
-export async function listProjects(actor: Actor) {
-  const [projects, defaultProjectId] = await Promise.all([
+export async function listProjects(actor: Actor, query: { page?: number; limit?: number; pageSize?: number } = {}) {
+  const { page, pageSize, skip } = pageWindow(query);
+  const where = projectAccessWhere(actor);
+  const [projects, total, defaultProjectId] = await Promise.all([
     prisma.project.findMany({
-      where: projectAccessWhere(actor),
-      orderBy: { createdAt: "asc" },
+      where,
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      skip,
+      take: pageSize,
       include: {
         _count: {
           select: {
@@ -51,10 +56,11 @@ export async function listProjects(actor: Actor) {
         },
       },
     }),
+    prisma.project.count({ where }),
     getUserDefaultProjectId(actor.id),
   ]);
 
-  if (!projects.length) return [];
+  if (!projects.length) return pageResult([], total, page, pageSize);
 
   const stats = await prisma.task.groupBy({
     by: ["projectId", "status"],
@@ -65,7 +71,8 @@ export async function listProjects(actor: Actor) {
     _count: { _all: true },
   });
 
-  return projects
+  return pageResult(
+    projects
     .map((project) => {
       const related = stats.filter((s) => s.projectId === project.id);
       const total = related.reduce((sum, s) => sum + s._count._all, 0);
@@ -86,7 +93,11 @@ export async function listProjects(actor: Actor) {
         defaultProjectId,
       );
     })
-    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.createdAt.getTime() - b.createdAt.getTime());
+    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.createdAt.getTime() - b.createdAt.getTime()),
+    total,
+    page,
+    pageSize,
+  );
 }
 
 export async function getProject(actor: Actor, id: string) {
@@ -99,21 +110,23 @@ export async function getProject(actor: Actor, id: string) {
   const [openTasks, completedTasks, notes, categories, members, files, activity] = await Promise.all([
     prisma.task.findMany({
       where: { projectId: id, parentTaskId: null, status: { in: ["INBOX", "TODO", "IN_PROGRESS", "BLOCKED"] } },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
-      take: 120,
+      relationLoadStrategy: "join",
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }, { id: "asc" }],
+      take: 20,
       include: taskPreviewInclude,
     }),
     prisma.task.findMany({
       where: { projectId: id, parentTaskId: null, status: "DONE" },
-      orderBy: { completedAt: "desc" },
-      take: 30,
+      relationLoadStrategy: "join",
+      orderBy: [{ completedAt: "desc" }, { id: "asc" }],
+      take: 20,
       include: taskPreviewInclude,
     }),
     prisma.note.findMany({
       where: { projectId: id },
       include: { category: { select: categorySelect }, user: { select: publicUserSelect } },
-      orderBy: { updatedAt: "desc" },
-      take: 40,
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+      take: 20,
     }),
     categoryStats(project.userId, id),
     prisma.projectMember.findMany({
@@ -125,6 +138,7 @@ export async function getProject(actor: Actor, id: string) {
       where: { projectId: id },
       include: { user: { select: publicUserSelect } },
       orderBy: { createdAt: "desc" },
+      take: 20,
     }),
     prisma.activityLog.findMany({
       where: { projectId: id },
@@ -236,8 +250,22 @@ export async function updateProject(
     where: { id },
     data: projectPatch,
   });
-  if (data.status === "COMPLETED" && existing.status !== "COMPLETED") {
-    await onProjectCompleted(existing.userId);
+  if (data.status && data.status !== existing.status) {
+    const members = await prisma.projectMember.findMany({ where: { projectId: id }, select: { userId: true } });
+    const { notifyUsers } = await import("../lib/events.js");
+    const type = data.status === "COMPLETED" ? "PROJECT_COMPLETED" : data.status === "ARCHIVED" ? "PROJECT_ARCHIVED" : "PROJECT_STATUS_CHANGED";
+    void notifyUsers({
+      userIds: [existing.userId, ...members.map((row) => row.userId)],
+      type,
+      title: "Project update",
+      body: `${updated.name} is now ${data.status}.`,
+      actorId: actor.id,
+      projectId: id,
+      entityType: "Project",
+      entityId: id,
+      eventId: `project-status:${id}:${data.status}`,
+    });
+    if (data.status === "COMPLETED") await onProjectCompleted(existing.userId);
   }
   return withProjectDefaultFlag(updated, await getUserDefaultProjectId(actor.id));
 }

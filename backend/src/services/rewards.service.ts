@@ -17,10 +17,32 @@ async function rulePoints(type: RewardRuleType) {
 
 async function addXp(userId: string, points: number) {
   if (points <= 0) return;
-  await prisma.user.update({
+  const before = await prisma.user.findUnique({ where: { id: userId }, select: { xp: true } });
+  const updated = await prisma.user.update({
     where: { id: userId },
     data: { xp: { increment: points } },
+    select: { xp: true },
   });
+  const { notifyUsers } = await import("../lib/events.js");
+  const previous = levelFromXp(before?.xp ?? 0).level;
+  const next = levelFromXp(updated.xp);
+  void notifyUsers({
+    userIds: [userId],
+    type: "REWARD_RECEIVED",
+    title: "XP received",
+    body: `You earned ${points} XP.`,
+    eventId: `xp:${userId}:${updated.xp}`,
+  });
+  if (next.level > previous) {
+    void notifyUsers({
+      userIds: [userId],
+      type: "LEVEL_UP",
+      title: "Level up",
+      body: `You reached level ${next.level}.`,
+      priority: "High",
+      eventId: `level:${userId}:${next.level}`,
+    });
+  }
 }
 
 async function awardIfMissing(userId: string, achievementId: string) {
@@ -128,7 +150,17 @@ export async function evaluateAchievements(userId: string) {
   for (const achievement of achievements) {
     if (valueFor(achievement.condition) >= achievement.threshold) {
       const created = await awardIfMissing(userId, achievement.id);
-      if (created) unlocked.push(achievement);
+      if (created) {
+        unlocked.push(achievement);
+        const { notifyUsers } = await import("../lib/events.js");
+        void notifyUsers({
+          userIds: [userId],
+          type: achievement.condition === "STREAK" ? "STREAK" : "ACHIEVEMENT_UNLOCKED",
+          title: achievement.condition === "STREAK" ? "Productivity streak" : "Achievement unlocked",
+          body: achievement.name,
+          eventId: `achievement:${userId}:${achievement.id}`,
+        });
+      }
     }
   }
   return unlocked;

@@ -47,7 +47,7 @@ export async function addFile(
     const task = await getAccessibleTask(actor, data.taskId);
     data.projectId = data.projectId ?? task.projectId;
   }
-  return prisma.fileLink.create({
+  const created = await prisma.fileLink.create({
     data: {
       userId: actor.id,
       title: data.title.trim(),
@@ -57,6 +57,26 @@ export async function addFile(
     },
     include: { user: { select: publicUserSelect } },
   });
+  if (data.taskId) {
+    const task = await prisma.task.findUnique({
+      where: { id: data.taskId },
+      include: { assignees: { select: { userId: true } } },
+    });
+    if (task) {
+      const { notifyUsers } = await import("../lib/events.js");
+      void notifyUsers({
+        userIds: [task.userId, ...task.assignees.map((row) => row.userId)],
+        type: "TASK_ATTACHMENT_ADDED",
+        title: "Attachment added",
+        body: created.title,
+        actorId: actor.id,
+        taskId: task.id,
+        projectId: task.projectId,
+        eventId: `file:${created.id}`,
+      });
+    }
+  }
+  return created;
 }
 
 export async function deleteFile(actor: Actor, id: string) {

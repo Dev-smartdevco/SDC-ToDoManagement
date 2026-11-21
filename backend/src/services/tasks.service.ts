@@ -18,6 +18,8 @@ import {
   type Actor,
 } from "../lib/access.js";
 import { actorName, notifyUsers, recordActivity } from "../lib/events.js";
+import { pageResult, pageWindow } from "../lib/paging.js";
+import { invalidateReadCache } from "../lib/readCache.js";
 import { onTaskCompleted } from "./rewards.service.js";
 
 export type TaskView = "all" | "inbox" | "today" | "upcoming" | "overdue" | "completed" | "blocked";
@@ -273,32 +275,31 @@ export async function listTasks(
     limit?: number;
   },
 ) {
-  const page = query.page ?? 1;
-  const limit = query.limit ?? 50;
+  const { page, pageSize, skip } = pageWindow(query);
   const where = buildTaskWhere(actor, query);
 
   const [items, total, defaultProjectId] = await Promise.all([
     prisma.task.findMany({
       where,
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
-      skip: (page - 1) * limit,
-      take: limit,
+      relationLoadStrategy: "join",
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }, { id: "asc" }],
+      skip,
+      take: pageSize,
       include: taskInclude,
     }),
     prisma.task.count({ where }),
     getUserDefaultProjectId(actor.id),
   ]);
 
-  return {
-    items: sortByUserDefaultProject(
+  return pageResult(
+    sortByUserDefaultProject(
       items.map((item) => serializeTask(item, defaultProjectId)),
       defaultProjectId,
     ),
-    page,
-    limit,
     total,
-    totalPages: Math.max(1, Math.ceil(total / limit) || 1),
-  };
+    page,
+    pageSize,
+  );
 }
 
 export async function getTask(actor: Actor, id: string, detailed = true) {
@@ -366,6 +367,7 @@ export async function createTask(
   if (data.subtasks?.length) await syncChecklist(actor.id, task.id, data.subtasks);
   if (data.parentTaskId) await applyParentProgress(actor.id, data.parentTaskId);
   const name = actorName(actor);
+  invalidateReadCache("analytics:");
   void recordActivity({
     type: "TASK_CREATED",
     actorId: actor.id,
@@ -375,13 +377,29 @@ export async function createTask(
   });
   void notifyUsers({
     userIds: assigneeIds,
-    type: "TASK_ASSIGNED",
-    title: "Assigned to a task",
-    body: `${name} assigned you to ${task.title}.`,
+    type: "TASK_CREATED",
+    title: "New task assigned",
+    body: `${name} assigned you a task: ${task.title}.`,
     actorId: actor.id,
     taskId: task.id,
     projectId: task.projectId,
+    priority: "High",
+    eventId: `created:${task.id}`,
   });
+  void import("./notificationEngine.js").then((engine) =>
+    engine.syncTaskReminders(
+      {
+        id: task.id,
+        title: task.title,
+        dueDate: task.dueDate,
+        dueTime: task.dueTime,
+        status: task.status,
+        userId: task.userId,
+        projectId: task.projectId,
+      },
+      assigneeIds,
+    ),
+  );
   return getTask(actor, task.id, false);
 }
 
@@ -407,6 +425,7 @@ export async function updateTask(
   },
 ) {
   assertWrite(actor);
+  invalidateReadCache("analytics:");
   const existing = await getAccessibleTask(actor, id);
 
   const nextProjectId = data.projectId !== undefined ? data.projectId : existing.projectId;
@@ -456,8 +475,12 @@ export async function updateTask(
   if (data.tags) await syncTags(existing.userId, id, data.tags);
   if (data.subtasks) await syncChecklist(existing.userId, id, data.subtasks);
   if (data.assigneeIds) {
+    const previousRows = await prisma.taskAssignee.findMany({ where: { taskId: id }, select: { userId: true } });
+    const previous = previousRows.map((row) => row.userId);
     const ids = await syncAssignees(id, existing.userId, data.assigneeIds);
     const name = actorName(actor);
+    const added = ids.filter((userId) => !previous.includes(userId));
+    const removed = previous.filter((userId) => !ids.includes(userId));
     void recordActivity({
       type: "TASK_ASSIGNED",
       actorId: actor.id,
@@ -466,13 +489,25 @@ export async function updateTask(
       message: `${name} updated assignees on ${existing.title}`,
     });
     void notifyUsers({
-      userIds: ids,
-      type: "TASK_ASSIGNED",
-      title: "Assigned to a task",
-      body: `${name} assigned you to ${existing.title}.`,
+      userIds: added,
+      type: previous.length ? "TASK_REASSIGNED" : "TASK_ASSIGNED",
+      title: previous.length ? "Task reassigned" : "New task assigned",
+      body: `${name} assigned you: ${existing.title}.`,
       actorId: actor.id,
       taskId: id,
       projectId: existing.projectId,
+      priority: "High",
+      eventId: `assign:${id}:${added.join(",")}`,
+    });
+    void notifyUsers({
+      userIds: removed,
+      type: "TASK_UNASSIGNED",
+      title: "Removed from a task",
+      body: `${name} removed you from ${existing.title}.`,
+      actorId: actor.id,
+      taskId: id,
+      projectId: existing.projectId,
+      eventId: `unassign:${id}:${removed.join(",")}`,
     });
   }
   if (data.status && !existing.parentTaskId && !data.subtasks) {
@@ -489,6 +524,10 @@ export async function updateTask(
   }
 
   const name = actorName(actor);
+  const watchers = async () => {
+    const rows = await prisma.taskAssignee.findMany({ where: { taskId: id }, select: { userId: true } });
+    return [existing.userId, ...rows.map((row) => row.userId)];
+  };
   if (data.status && data.status !== existing.status) {
     void recordActivity({
       type: data.status === "DONE" ? "TASK_COMPLETED" : data.status === "BLOCKED" ? "TASK_BLOCKED" : "STATUS_CHANGED",
@@ -510,14 +549,61 @@ export async function updateTask(
         });
         await notifyUsers({
           userIds: [existing.userId, ...assigneeIds],
-          type: "TASK_COMPLETED",
+          type: existing.userId === actor.id ? "TASK_COMPLETED" : "TEAM_TASK_COMPLETED",
           title: "Task completed",
           body: `${name} completed ${existing.title}.`,
           actorId: actor.id,
           taskId: id,
           projectId: existing.projectId,
+          eventId: `done:${id}`,
         });
       })();
+      void import("./notificationEngine.js").then((engine) => engine.cancelTaskReminders(id));
+    } else if (existing.status === "DONE") {
+      void notifyUsers({
+        userIds: await watchers(),
+        type: "TASK_REOPENED",
+        title: "Task reopened",
+        body: `${name} reopened ${existing.title}.`,
+        actorId: actor.id,
+        taskId: id,
+        projectId: existing.projectId,
+        eventId: `reopen:${id}:${data.status}`,
+      });
+    } else if (data.status === "BLOCKED") {
+      void notifyUsers({
+        userIds: await watchers(),
+        type: "TASK_BLOCKED",
+        title: "Task blocked",
+        body: `${name} blocked ${existing.title}.`,
+        actorId: actor.id,
+        taskId: id,
+        projectId: existing.projectId,
+        priority: "High",
+        eventId: `blocked:${id}`,
+      });
+    } else if (existing.status === "BLOCKED") {
+      void notifyUsers({
+        userIds: await watchers(),
+        type: "TASK_UNBLOCKED",
+        title: "Task unblocked",
+        body: `${existing.title} is available again.`,
+        actorId: actor.id,
+        taskId: id,
+        projectId: existing.projectId,
+        eventId: `unblocked:${id}:${data.status}`,
+      });
+    } else {
+      void notifyUsers({
+        userIds: await watchers(),
+        type: "TASK_STATUS_CHANGED",
+        title: "Task status changed",
+        body: `${existing.title} is now ${data.status}.`,
+        actorId: actor.id,
+        taskId: id,
+        projectId: existing.projectId,
+        eventId: `status:${id}:${data.status}`,
+      });
     }
   }
   if (data.priority && data.priority !== existing.priority) {
@@ -528,6 +614,16 @@ export async function updateTask(
       projectId: existing.projectId,
       message: `${name} changed priority on ${existing.title}`,
     });
+    void notifyUsers({
+      userIds: await watchers(),
+      type: "TASK_PRIORITY_CHANGED",
+      title: "Priority changed",
+      body: `${existing.title} is now ${data.priority}.`,
+      actorId: actor.id,
+      taskId: id,
+      projectId: existing.projectId,
+      eventId: `priority:${id}:${data.priority}`,
+    });
   }
   if (data.dueDate !== undefined && data.dueDate !== existing.dueDate) {
     void recordActivity({
@@ -536,6 +632,33 @@ export async function updateTask(
       taskId: id,
       projectId: existing.projectId,
       message: `${name} changed the due date on ${existing.title}`,
+    });
+    void notifyUsers({
+      userIds: await watchers(),
+      type: "TASK_DUE_DATE_CHANGED",
+      title: "Deadline changed",
+      body: `${existing.title} is now due ${data.dueDate ?? "with no date"}.`,
+      actorId: actor.id,
+      taskId: id,
+      projectId: existing.projectId,
+      eventId: `due:${id}:${data.dueDate ?? "none"}`,
+    });
+  }
+  if (data.dueDate !== undefined || data.dueTime !== undefined || data.status) {
+    void import("./notificationEngine.js").then(async (engine) => {
+      const assignees = await prisma.taskAssignee.findMany({ where: { taskId: id }, select: { userId: true } });
+      await engine.syncTaskReminders(
+        {
+          id,
+          title: data.title ?? existing.title,
+          dueDate: data.dueDate !== undefined ? data.dueDate : existing.dueDate,
+          dueTime: data.dueTime !== undefined ? data.dueTime : existing.dueTime,
+          status: nextStatus,
+          userId: existing.userId,
+          projectId: nextProjectId,
+        },
+        assignees.map((row) => row.userId),
+      );
     });
   }
 
@@ -548,11 +671,24 @@ export async function updateTaskStatus(actor: Actor, id: string, status: TaskSta
 
 export async function deleteTask(actor: Actor, id: string) {
   assertWrite(actor);
+  invalidateReadCache("analytics:");
   const existing = await getAccessibleTask(actor, id);
   if (existing.userId !== actor.id && actor.role !== "SUPER_ADMIN" && actor.role !== "ADMIN") {
     throw errors.forbidden();
   }
   const parentId = existing.parentTaskId;
+  const assignees = await prisma.taskAssignee.findMany({ where: { taskId: id }, select: { userId: true } });
+  void notifyUsers({
+    userIds: [existing.userId, ...assignees.map((row) => row.userId)],
+    type: "TASK_DELETED",
+    title: "Task deleted",
+    body: `${actorName(actor)} deleted ${existing.title}.`,
+    actorId: actor.id,
+    taskId: id,
+    projectId: existing.projectId,
+    eventId: `deleted:${id}`,
+  });
+  void import("./notificationEngine.js").then((engine) => engine.cancelTaskReminders(id));
   await prisma.task.delete({ where: { id } });
   if (parentId) await applyParentProgress(existing.userId, parentId);
   return { ok: true };

@@ -36,7 +36,48 @@ export async function addComment(actor: Actor, taskId: string, message: string) 
     actorId: actor.id,
     taskId,
     projectId: task.projectId,
+    eventId: `comment:${comment.id}`,
   });
+  const handles = [...message.matchAll(/@([A-Za-z0-9._-]{2,40})/g)].map((match) => match[1].toLowerCase());
+  if (handles.length) {
+    const people = await prisma.user.findMany({
+      where: {
+        isActive: true,
+        OR: handles.flatMap((handle) => [
+          { name: { contains: handle, mode: "insensitive" as const } },
+          { email: { startsWith: handle, mode: "insensitive" as const } },
+        ]),
+      },
+      select: { id: true, name: true, email: true },
+      take: 30,
+    });
+    const mentioned = people
+      .filter((person) => handles.some((handle) => person.name.toLowerCase().includes(handle) || person.email.toLowerCase().startsWith(handle)))
+      .map((person) => person.id);
+    void notifyUsers({
+      userIds: mentioned,
+      type: "TASK_MENTIONED",
+      title: "You were mentioned",
+      body: `${name} mentioned you on ${task.title}.`,
+      actorId: actor.id,
+      taskId,
+      projectId: task.projectId,
+      priority: "High",
+      eventId: `mention:${comment.id}`,
+    });
+    const earlier = await prisma.taskComment.findMany({ where: { taskId, id: { not: comment.id } }, select: { userId: true } });
+    const replied = earlier.map((row) => row.userId).filter((id) => mentioned.includes(id));
+    void notifyUsers({
+      userIds: replied,
+      type: "TASK_COMMENT_REPLIED",
+      title: "Reply to your comment",
+      body: `${name} replied on ${task.title}.`,
+      actorId: actor.id,
+      taskId,
+      projectId: task.projectId,
+      eventId: `reply:${comment.id}`,
+    });
+  }
   return comment;
 }
 

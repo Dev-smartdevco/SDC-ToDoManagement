@@ -37,7 +37,9 @@ export async function calendar(
             : {},
         ],
       },
-      orderBy: [{ dueDate: "asc" }, { dueTime: "asc" }],
+      relationLoadStrategy: "join",
+      orderBy: [{ dueDate: "asc" }, { dueTime: "asc" }, { id: "asc" }],
+      take: 150,
       include: {
         project: { select: { id: true, name: true, color: true } },
         assignees: { include: { user: { select: { id: true, name: true } } } },

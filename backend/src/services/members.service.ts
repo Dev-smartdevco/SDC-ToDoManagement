@@ -105,5 +105,14 @@ export async function removeMember(actor: Actor, projectId: string, userId: stri
     projectId,
     message: `${name} removed ${existing.user.name} from ${project.name}`,
   });
+  void notifyUsers({
+    userIds: [userId],
+    type: "PROJECT_MEMBER_REMOVED",
+    title: "Removed from project",
+    body: `You were removed from ${project.name}.`,
+    actorId: actor.id,
+    projectId,
+    eventId: `project-remove:${projectId}:${userId}`,
+  });
   return { ok: true };
 }

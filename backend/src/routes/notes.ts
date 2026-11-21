@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { asyncHandler } from "../lib/asyncHandler.js";
-import { noteSchema } from "../validators/index.js";
+import { noteSchema, paginationSchema } from "../validators/index.js";
 import * as notesService from "../services/notes.service.js";
 import { requireAuth, type AuthRequest } from "../middleware/auth.js";
 
@@ -10,13 +10,16 @@ notesRouter.use(requireAuth);
 notesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
+    const paging = paginationSchema.parse(req.query);
     const data = await notesService.listNotes((req as AuthRequest).userId, {
       q: typeof req.query.q === "string" ? req.query.q : undefined,
       projectId: typeof req.query.projectId === "string" ? req.query.projectId : undefined,
       categoryId: typeof req.query.categoryId === "string" ? req.query.categoryId : undefined,
       tag: typeof req.query.tag === "string" ? req.query.tag : undefined,
+      page: paging.page,
+      pageSize: paging.pageSize ?? paging.limit,
     });
-    res.json(data);
+    res.json(req.query.page || req.query.limit || req.query.pageSize ? data : data.items);
   }),
 );
 

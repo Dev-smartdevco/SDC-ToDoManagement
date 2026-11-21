@@ -6,6 +6,7 @@ import {
   sortByUserDefaultProject,
   withNestedProjectDefaultFlag,
 } from "../lib/defaultProject.js";
+import { pageResult, pageWindow } from "../lib/paging.js";
 
 const noteInclude = {
   project: { select: { id: true, name: true, color: true } },
@@ -19,42 +20,54 @@ function serializeNote<T extends { project?: { id: string } | null }>(note: T, d
 
 export async function listNotes(
   userId: string,
-  query: { q?: string; projectId?: string; categoryId?: string; tag?: string },
+  query: { q?: string; projectId?: string; categoryId?: string; tag?: string; page?: number; limit?: number; pageSize?: number },
 ) {
-  const [notes, defaultProjectId] = await Promise.all([
-    prisma.note.findMany({
-      where: {
-        AND: [
-          {
-            OR: [
-              { userId },
-              { project: { OR: [{ userId }, { members: { some: { userId } } }] } },
-            ],
-          },
-        ],
-        projectId: query.projectId || undefined,
-        categoryId: query.categoryId || undefined,
-        tags: query.tag ? { has: query.tag } : undefined,
-        OR: query.q
-          ? [
-              { title: { contains: query.q, mode: "insensitive" } },
-              { content: { contains: query.q, mode: "insensitive" } },
-              { project: { name: { contains: query.q, mode: "insensitive" } } },
-              { category: { name: { contains: query.q, mode: "insensitive" } } },
-              { task: { title: { contains: query.q, mode: "insensitive" } } },
-            ]
-          : undefined,
+  const { page, pageSize, skip } = pageWindow(query);
+  const where = {
+    AND: [
+      {
+        OR: [{ userId }, { project: { OR: [{ userId }, { members: { some: { userId } } }] } }],
       },
+    ],
+    projectId: query.projectId || undefined,
+    categoryId: query.categoryId || undefined,
+    tags: query.tag ? { has: query.tag } : undefined,
+    OR: query.q
+      ? [
+          { title: { contains: query.q, mode: "insensitive" as const } },
+          { content: { contains: query.q, mode: "insensitive" as const } },
+          { project: { name: { contains: query.q, mode: "insensitive" as const } } },
+          { category: { name: { contains: query.q, mode: "insensitive" as const } } },
+          { task: { title: { contains: query.q, mode: "insensitive" as const } } },
+        ]
+      : undefined,
+  };
+  const [notes, total, defaultProjectId] = await Promise.all([
+    prisma.note.findMany({
+      where,
+      relationLoadStrategy: "join",
       include: noteInclude,
-      orderBy: { updatedAt: "desc" },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+      skip,
+      take: pageSize,
     }),
+    prisma.note.count({ where }),
     getUserDefaultProjectId(userId),
   ]);
 
-  return sortByUserDefaultProject(
-    notes.map((note) => serializeNote(note, defaultProjectId)),
+  const items = sortByUserDefaultProject(
+    notes.map((note) =>
+      serializeNote(
+        {
+          ...note,
+          content: note.content.length > 180 ? `${note.content.slice(0, 180)}…` : note.content,
+        },
+        defaultProjectId,
+      ),
+    ),
     defaultProjectId,
   );
+  return pageResult(items, total, page, pageSize);
 }
 
 export async function getNote(userId: string, id: string) {
@@ -109,6 +122,7 @@ export async function updateNote(
     categoryId?: string | null;
     taskId?: string | null;
     tags?: string[];
+    sharedWith?: string[];
   },
 ) {
   const existing = await prisma.note.findFirst({ where: { id, userId } });
@@ -129,6 +143,20 @@ export async function updateNote(
     }),
     getUserDefaultProjectId(userId),
   ]);
+  if (data.sharedWith) {
+    const previous = new Set(existing.sharedWith ?? []);
+    const added = data.sharedWith.filter((memberId) => !previous.has(memberId));
+    const { notifyUsers } = await import("../lib/events.js");
+    void notifyUsers({
+      userIds: added,
+      type: "NOTE_SHARED",
+      title: "Note shared with you",
+      body: note.title,
+      entityType: "Note",
+      entityId: note.id,
+      eventId: `note-share:${note.id}:${added.join(",")}`,
+    });
+  }
   return serializeNote(note, defaultProjectId);
 }
 

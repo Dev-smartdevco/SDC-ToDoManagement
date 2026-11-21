@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../lib/asyncHandler.js";
 import { requireAuth, requireWrite, type AuthRequest } from "../middleware/auth.js";
-import { commentSchema, fileLinkSchema, recognitionSchema, rewardRuleUpdateSchema, settingSchema, timeLogSchema } from "../validators/index.js";
+import { commentSchema, fileLinkSchema, paginationSchema, recognitionSchema, rewardRuleUpdateSchema, settingSchema, timeLogSchema } from "../validators/index.js";
 import * as commentsService from "../services/comments.service.js";
 import * as filesService from "../services/files.service.js";
 import * as notificationsService from "../services/notifications.service.js";
@@ -20,8 +20,14 @@ collaborationRouter.use(requireAuth);
 collaborationRouter.get(
   "/notifications",
   asyncHandler(async (req, res) => {
-    const data = await notificationsService.listNotifications((req as AuthRequest).actor, req.query.unread === "true");
-    res.json(data);
+    const page = typeof req.query.page === "string" ? Number(req.query.page) : undefined;
+    const data = await notificationsService.listNotifications((req as AuthRequest).actor, {
+      unread: req.query.unread === "true",
+      category: typeof req.query.category === "string" ? req.query.category : undefined,
+      page,
+      limit: typeof req.query.limit === "string" ? Number(req.query.limit) : undefined,
+    });
+    res.json(page ? data : data.items);
   }),
 );
 
@@ -33,19 +39,74 @@ collaborationRouter.get(
   }),
 );
 
-collaborationRouter.post(
-  "/notifications/read-all",
+collaborationRouter.get(
+  "/notifications/preferences",
   asyncHandler(async (req, res) => {
-    const data = await notificationsService.markAllRead((req as AuthRequest).actor);
-    res.json(data);
+    res.json(await notificationsService.getPreferences((req as AuthRequest).actor));
+  }),
+);
+
+collaborationRouter.put(
+  "/notifications/preferences",
+  asyncHandler(async (req, res) => {
+    res.json(await notificationsService.savePreferences((req as AuthRequest).actor, req.body ?? {}));
   }),
 );
 
 collaborationRouter.post(
-  "/notifications/:id/read",
+  "/notifications/devices/register",
   asyncHandler(async (req, res) => {
-    const data = await notificationsService.markRead((req as AuthRequest).actor, String(req.params.id));
-    res.json(data);
+    const platform = String(req.body?.platform ?? "").toUpperCase();
+    if (platform !== "ANDROID" && platform !== "IOS" && platform !== "WEB") {
+      res.status(400).json({ error: { message: "Platform must be ANDROID, IOS, or WEB." } });
+      return;
+    }
+    const data = await notificationsService.registerDevice((req as AuthRequest).actor, {
+      token: String(req.body?.token ?? ""),
+      platform,
+      name: typeof req.body?.name === "string" ? req.body.name : null,
+    });
+    res.status(201).json(data);
+  }),
+);
+
+collaborationRouter.delete(
+  "/notifications/devices/:id",
+  asyncHandler(async (req, res) => {
+    res.json(await notificationsService.removeDevice((req as AuthRequest).actor, String(req.params.id)));
+  }),
+);
+
+const markAll = asyncHandler(async (req, res) => {
+  res.json(await notificationsService.markAllRead((req as AuthRequest).actor));
+});
+collaborationRouter.post("/notifications/read-all", markAll);
+collaborationRouter.patch("/notifications/read-all", markAll);
+
+collaborationRouter.delete(
+  "/notifications",
+  asyncHandler(async (req, res) => {
+    res.json(await notificationsService.clearNotifications((req as AuthRequest).actor));
+  }),
+);
+
+collaborationRouter.get(
+  "/notifications/:id",
+  asyncHandler(async (req, res) => {
+    res.json(await notificationsService.getNotification((req as AuthRequest).actor, String(req.params.id)));
+  }),
+);
+
+const markOne = asyncHandler(async (req, res) => {
+  res.json(await notificationsService.markRead((req as AuthRequest).actor, String(req.params.id)));
+});
+collaborationRouter.post("/notifications/:id/read", markOne);
+collaborationRouter.patch("/notifications/:id/read", markOne);
+
+collaborationRouter.delete(
+  "/notifications/:id",
+  asyncHandler(async (req, res) => {
+    res.json(await notificationsService.removeNotification((req as AuthRequest).actor, String(req.params.id)));
   }),
 );
 
@@ -60,11 +121,14 @@ collaborationRouter.get(
 collaborationRouter.get(
   "/activity",
   asyncHandler(async (req, res) => {
+    const paging = paginationSchema.parse(req.query);
     const data = await teamService.listActivity((req as AuthRequest).actor, {
       projectId: typeof req.query.projectId === "string" ? req.query.projectId : undefined,
       taskId: typeof req.query.taskId === "string" ? req.query.taskId : undefined,
+      page: paging.page,
+      pageSize: paging.pageSize ?? paging.limit,
     });
-    res.json(data);
+    res.json(req.query.page || req.query.limit || req.query.pageSize ? data : data.items);
   }),
 );
 
@@ -89,6 +153,7 @@ collaborationRouter.get(
     const data = await analyticsService.analytics(
       (req as AuthRequest).actor,
       typeof req.query.projectId === "string" ? req.query.projectId : undefined,
+      req.get("x-bypass-cache") === "1",
     );
     res.json(data);
   }),
@@ -97,11 +162,13 @@ collaborationRouter.get(
 collaborationRouter.get(
   "/recognition",
   asyncHandler(async (req, res) => {
-    const data = await recognitionService.listRecognition(
-      (req as AuthRequest).actor,
-      typeof req.query.projectId === "string" ? req.query.projectId : undefined,
-    );
-    res.json(data);
+    const paging = paginationSchema.parse(req.query);
+    const data = await recognitionService.listRecognition((req as AuthRequest).actor, {
+      projectId: typeof req.query.projectId === "string" ? req.query.projectId : undefined,
+      page: paging.page,
+      pageSize: paging.pageSize ?? paging.limit,
+    });
+    res.json(req.query.page || req.query.limit || req.query.pageSize ? data : data.items);
   }),
 );
 

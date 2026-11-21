@@ -119,6 +119,15 @@ export async function completeFocus(userId: string, id: string, completeTask = f
     },
   });
   await prisma.user.update({ where: { id: userId }, data: { currentFocusTaskId: null } });
+  const { notifyUsers } = await import("../lib/events.js");
+  void notifyUsers({
+    userIds: [userId],
+    type: "FOCUS_COMPLETED",
+    title: "Focus session complete",
+    body: updated.task?.title ? `Finished focus on ${updated.task.title}.` : "Your focus session finished.",
+    taskId: session.taskId,
+    eventId: `focus:${id}`,
+  });
   return { ...updated, liveSeconds: accumulatedSeconds };
 }
 

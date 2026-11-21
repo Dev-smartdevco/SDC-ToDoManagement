@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { asyncHandler } from "../lib/asyncHandler.js";
-import { memberSchema, projectSchema } from "../validators/index.js";
+import { memberSchema, paginationSchema, projectSchema } from "../validators/index.js";
 import * as projectsService from "../services/projects.service.js";
 import * as categoriesService from "../services/categories.service.js";
 import * as membersService from "../services/members.service.js";
@@ -13,8 +13,12 @@ projectsRouter.use(requireAuth);
 projectsRouter.get(
   "/",
   asyncHandler(async (req, res) => {
-    const data = await projectsService.listProjects((req as AuthRequest).actor);
-    res.json(data);
+    const paging = paginationSchema.parse(req.query);
+    const data = await projectsService.listProjects((req as AuthRequest).actor, {
+      page: paging.page,
+      pageSize: paging.pageSize ?? paging.limit,
+    });
+    res.json(req.query.page || req.query.limit || req.query.pageSize ? data : data.items);
   }),
 );
 

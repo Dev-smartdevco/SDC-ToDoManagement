@@ -76,5 +76,14 @@ export async function changePassword(userId: string, currentPassword: string | u
     },
   });
   invalidateActor(userId);
+  const { notifyUsers } = await import("../lib/events.js");
+  void notifyUsers({
+    userIds: [userId],
+    type: "PASSWORD_CHANGED",
+    title: "Password changed",
+    body: "Your MY OS password was changed.",
+    priority: "High",
+    eventId: `password:${userId}:${Date.now()}`,
+  });
   return { ok: true };
 }

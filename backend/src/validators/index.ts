@@ -2,7 +2,8 @@ import { z } from "zod";
 
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  pageSize: z.coerce.number().int().min(1).max(100).optional(),
 });
 
 export const loginSchema = z.object({
@@ -82,6 +83,7 @@ export const noteSchema = z.object({
   categoryId: z.string().uuid().optional().nullable(),
   taskId: z.string().uuid().optional().nullable(),
   tags: z.array(z.string().trim().min(1).max(40)).optional(),
+  sharedWith: z.array(z.string().uuid()).max(50).optional(),
 });
 
 export const timeBlockSchema = z.object({

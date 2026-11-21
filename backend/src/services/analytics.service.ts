@@ -1,8 +1,22 @@
 import { prisma } from "../lib/prisma.js";
 import { projectAccessWhere, taskAccessWhere, type Actor } from "../lib/access.js";
 import { subtractDaysIso, todayIso } from "../lib/dates.js";
+import { readCache, writeCache } from "../lib/readCache.js";
 
-export async function analytics(actor: Actor, projectId?: string) {
+const ANALYTICS_TTL_MS = 20_000;
+
+export async function analytics(actor: Actor, projectId?: string, bypassCache = false) {
+  const cacheKey = `analytics:${actor.id}:${projectId ?? ""}`;
+  if (!bypassCache) {
+    const cached = readCache<Awaited<ReturnType<typeof loadAnalytics>>>(cacheKey, ANALYTICS_TTL_MS);
+    if (cached) return cached;
+  }
+  const value = await loadAnalytics(actor, projectId);
+  writeCache(cacheKey, value);
+  return value;
+}
+
+async function loadAnalytics(actor: Actor, projectId?: string) {
   const today = todayIso();
   const from = subtractDaysIso(today, 30);
   const taskWhere = {
@@ -29,9 +43,14 @@ export async function analytics(actor: Actor, projectId?: string) {
       where: { createdAt: { gte: new Date(`${from}T00:00:00.000Z`) }, projectId: projectId || undefined },
     }),
     prisma.task.findMany({
-      where: { ...taskWhere, status: "DONE", completedAt: { not: null } },
+      where: {
+        ...taskWhere,
+        status: "DONE",
+        completedAt: { not: null, gte: new Date(`${from}T00:00:00.000Z`) },
+      },
       select: { createdAt: true, completedAt: true, estimatedMinutes: true, actualMinutes: true },
-      take: 400,
+      orderBy: { completedAt: "desc" },
+      take: 100,
     }),
   ]);
 

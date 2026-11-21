@@ -24,7 +24,7 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
   const startOfDay = new Date(`${date}T00:00:00.000Z`);
   const endOfDay = new Date(`${date}T23:59:59.999Z`);
 
-  const [todayTasks, overdueTasks, laterTasks, timeBlocks, activeFocus, user, focusAgg, existingReview] =
+  const [todayTasks, overdueTasks, overdueTotal, laterTasks, timeBlocks, activeFocus, user, focusAgg, existingReview] =
     await Promise.all([
       prisma.task.findMany({
         where: {
@@ -33,7 +33,9 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
           dueDate: date,
           status: { not: "CANCELLED" },
         },
-        orderBy: [{ sortOrder: "asc" }, { dueTime: "asc" }, { createdAt: "desc" }],
+        relationLoadStrategy: "join",
+        orderBy: [{ sortOrder: "asc" }, { dueTime: "asc" }, { createdAt: "desc" }, { id: "asc" }],
+        take: 20,
         include: taskPreview,
       }),
       prisma.task.findMany({
@@ -43,9 +45,18 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
           status: { in: [...OPEN_STATUSES] },
           dueDate: { lt: date, not: null },
         },
-        orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
-        take: 40,
+        relationLoadStrategy: "join",
+        orderBy: [{ dueDate: "asc" }, { id: "asc" }],
+        take: 20,
         include: taskPreview,
+      }),
+      prisma.task.count({
+        where: {
+          OR: [{ userId }, { assignees: { some: { userId } } }],
+          parentTaskId: null,
+          status: { in: [...OPEN_STATUSES] },
+          dueDate: { lt: date, not: null },
+        },
       }),
       prisma.task.findMany({
         where: {
@@ -54,8 +65,9 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
           status: { in: [...OPEN_STATUSES] },
           dueDate: { gt: date },
         },
-        orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
-        take: 12,
+        relationLoadStrategy: "join",
+        orderBy: [{ dueDate: "asc" }, { id: "asc" }],
+        take: 8,
         include: taskPreview,
       }),
       prisma.timeBlock.findMany({
@@ -140,7 +152,7 @@ export async function getTodayDashboard(userId: string, date = todayIso()) {
     plannedCount,
     completedCount,
     focusMinutes,
-    overdueCount: overdueTasks.length,
+    overdueCount: overdueTotal,
     currentFocus: currentFocus ? mapTask(currentFocus, defaultProjectId) : null,
     activeFocus,
     todayTasks: {
