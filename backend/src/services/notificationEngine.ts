@@ -124,6 +124,7 @@ async function queuePush(notificationId: string, userId: string, prefs: Awaited<
   const quiet = quietHoursActive(new Date(), prefs.quietStart, prefs.quietEnd, prefs.timeZone) && !isSecurity(data.type);
   const devices = await prisma.device.findMany({ where: { userId, active: true } });
   if (!devices.length) {
+    console.info("notification.push", JSON.stringify({ result: "skipped", reason: "no-active-device" }));
     await prisma.notificationDelivery.create({
       data: { notificationId, status: "SKIPPED", lastError: "No active device token" },
     });

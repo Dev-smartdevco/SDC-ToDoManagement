@@ -1,0 +1,57 @@
+[1mdiff --git a/backend/src/services/notificationEngine.ts b/backend/src/services/notificationEngine.ts[m
+[1mindex f01c956..c9d4b9d 100644[m
+[1m--- a/backend/src/services/notificationEngine.ts[m
+[1m+++ b/backend/src/services/notificationEngine.ts[m
+[36m@@ -124,6 +124,7 @@[m [masync function queuePush(notificationId: string, userId: string, prefs: Awaited<[m
+   const quiet = quietHoursActive(new Date(), prefs.quietStart, prefs.quietEnd, prefs.timeZone) && !isSecurity(data.type);[m
+   const devices = await prisma.device.findMany({ where: { userId, active: true } });[m
+   if (!devices.length) {[m
+[32m+[m[32m    console.info("notification.push", JSON.stringify({ result: "skipped", reason: "no-active-device" }));[m
+     await prisma.notificationDelivery.create({[m
+       data: { notificationId, status: "SKIPPED", lastError: "No active device token" },[m
+     });[m
+[1mdiff --git a/backend/src/services/push.service.ts b/backend/src/services/push.service.ts[m
+[1mindex 0e77a08..080e989 100644[m
+[1m--- a/backend/src/services/push.service.ts[m
+[1m+++ b/backend/src/services/push.service.ts[m
+[36m@@ -68,6 +68,13 @@[m [mfunction messaging() {[m
+   return getMessaging();[m
+ }[m
+ [m
+[32m+[m[32mexport function apnsAlertHeaders() {[m
+[32m+[m[32m  return {[m
+[32m+[m[32m    "apns-priority": "10",[m
+[32m+[m[32m    "apns-push-type": "alert",[m
+[32m+[m[32m  };[m
+[32m+[m[32m}[m
+[32m+[m
+ export async function sendFcm(token: string, payload: Record<string, string>, badge = 1) {[m
+   const client = messaging();[m
+   if (!client) return { ok: false as const, error: "FCM is not configured", invalid: false };[m
+[36m@@ -83,10 +90,7 @@[m [mexport async function sendFcm(token: string, payload: Record<string, string>, ba[m
+         notification: { channelId: "myos_alerts", sound },[m
+       },[m
+       apns: {[m
+[31m-        headers: {[m
+[31m-          "apns-priority": payload.priority === "High" ? "10" : "5",[m
+[31m-          "apns-push-type": "alert",[m
+[31m-        },[m
+[32m+[m[32m        headers: apnsAlertHeaders(),[m
+         payload: {[m
+           aps: {[m
+             alert: { title: payload.title, body: preview },[m
+[36m@@ -96,12 +100,13 @@[m [mexport async function sendFcm(token: string, payload: Record<string, string>, ba[m
+         },[m
+       },[m
+     });[m
+[32m+[m[32m    console.info("fcm.accepted");[m
+     return { ok: true as const, error: null, invalid: false };[m
+   } catch (error) {[m
+     const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";[m
+     const message = error instanceof Error ? error.message : "Push delivery failed";[m
+     const safe = publicError(`${code} ${message}`.trim());[m
+[31m-    console.error("fcm.send", safe);[m
+[32m+[m[32m    console.error("fcm.send", JSON.stringify({ code: code || "unknown", invalid: isInvalidDeviceToken(code, message) }));[m
+     return { ok: false as const, error: safe, invalid: isInvalidDeviceToken(code, message) };[m
+   }[m
+ }[m

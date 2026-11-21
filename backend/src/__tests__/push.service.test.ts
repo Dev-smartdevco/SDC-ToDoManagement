@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firebaseConfigError, firebaseConfigured, isInvalidDeviceToken } from "../services/push.service.js";
+import { apnsAlertHeaders, firebaseConfigError, firebaseConfigured, isInvalidDeviceToken } from "../services/push.service.js";
 
 describe("FCM delivery errors", () => {
   it("marks expired and malformed device tokens as invalid", () => {
@@ -8,6 +8,10 @@ describe("FCM delivery errors", () => {
     expect(isInvalidDeviceToken("messaging/invalid-argument", "The registration token is invalid")).toBe(true);
     expect(isInvalidDeviceToken("messaging/invalid-argument", "payload field is missing")).toBe(false);
     expect(isInvalidDeviceToken("messaging/internal-error", "temporarily unavailable")).toBe(false);
+  });
+
+  it("sends iOS alerts at immediate priority", () => {
+    expect(apnsAlertHeaders()).toEqual({ "apns-priority": "10", "apns-push-type": "alert" });
   });
 
   it("does not treat a missing service account as a configured project", () => {

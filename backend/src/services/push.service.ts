@@ -68,6 +68,13 @@ function messaging() {
   return getMessaging();
 }
 
+export function apnsAlertHeaders() {
+  return {
+    "apns-priority": "10",
+    "apns-push-type": "alert",
+  };
+}
+
 export async function sendFcm(token: string, payload: Record<string, string>, badge = 1) {
   const client = messaging();
   if (!client) return { ok: false as const, error: "FCM is not configured", invalid: false };
@@ -83,10 +90,7 @@ export async function sendFcm(token: string, payload: Record<string, string>, ba
         notification: { channelId: "myos_alerts", sound },
       },
       apns: {
-        headers: {
-          "apns-priority": payload.priority === "High" ? "10" : "5",
-          "apns-push-type": "alert",
-        },
+        headers: apnsAlertHeaders(),
         payload: {
           aps: {
             alert: { title: payload.title, body: preview },
@@ -96,12 +100,13 @@ export async function sendFcm(token: string, payload: Record<string, string>, ba
         },
       },
     });
+    console.info("fcm.accepted");
     return { ok: true as const, error: null, invalid: false };
   } catch (error) {
     const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
     const message = error instanceof Error ? error.message : "Push delivery failed";
     const safe = publicError(`${code} ${message}`.trim());
-    console.error("fcm.send", safe);
+    console.error("fcm.send", JSON.stringify({ code: code || "unknown", invalid: isInvalidDeviceToken(code, message) }));
     return { ok: false as const, error: safe, invalid: isInvalidDeviceToken(code, message) };
   }
 }
