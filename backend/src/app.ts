@@ -6,6 +6,7 @@ import { authRouter } from "./routes/auth.js";
 import { projectsRouter } from "./routes/projects.js";
 import { tasksRouter, commentsRouter } from "./routes/tasks.js";
 import { notesRouter } from "./routes/notes.js";
+import { smartNotesRouter } from "./routes/smartNotes.js";
 import { timeBlocksRouter } from "./routes/timeBlocks.js";
 import { focusRouter } from "./routes/focus.js";
 import { dashboardRouter } from "./routes/dashboard.js";
@@ -71,6 +72,7 @@ export function createApp() {
   app.use("/api/tasks", tasksRouter);
   app.use("/api/comments", commentsRouter);
   app.use("/api/notes", notesRouter);
+  app.use("/api/smart-notes", smartNotesRouter);
   app.use("/api/time-blocks", timeBlocksRouter);
   app.use("/api/focus", focusRouter);
   app.use("/api/dashboard", dashboardRouter);

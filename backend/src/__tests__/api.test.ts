@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
+import { randomUUID } from "node:crypto";
 import { createApp } from "../app.js";
 import { prisma } from "../lib/prisma.js";
 import { todayIso } from "../lib/dates.js";
@@ -12,6 +13,9 @@ let taskId = "";
 let noteId = "";
 let blockId = "";
 let focusId = "";
+let smartNoteRequestId = "";
+let smartNoteId = "";
+let smartTaskIds: string[] = [];
 
 describe("MY OS API", () => {
   beforeAll(async () => {
@@ -48,6 +52,44 @@ describe("MY OS API", () => {
       .send({ name: "TEST LAB", color: "#334155", icon: "flask" });
     expect(created.status).toBe(201);
     projectId = created.body.id;
+  });
+
+  it("saves Smart Notes with an atomic, idempotent task hierarchy", async () => {
+    const unauthorized = await request(app).post("/api/smart-notes/save").send({});
+    expect(unauthorized.status).toBe(401);
+
+    smartNoteRequestId = randomUUID();
+    const payload = {
+      requestId: smartNoteRequestId,
+      title: "Smart Notes integration test",
+      content: "Build the feature\nReview design",
+      projectId,
+      originalDrawing: { strokes: [{ points: [{ x: 1, y: 2, p: 1, t: 0 }] }] },
+      saveNote: true,
+      createTasks: true,
+      tasks: [
+        { title: "Build the feature", level: 0 },
+        { title: "Review design", level: 1 },
+        { title: "Ship the feature", level: 0 },
+      ],
+    };
+    const saved = await request(app).post("/api/smart-notes/save").set("Authorization", `Bearer ${token}`).send(payload);
+    expect(saved.status).toBe(201);
+    smartNoteId = saved.body.note.id;
+    smartTaskIds = saved.body.taskIds;
+    expect(smartTaskIds).toHaveLength(3);
+    expect(saved.body.replayed).toBe(false);
+    expect(saved.body.note.projectId).toBe(projectId);
+
+    const rows = await prisma.task.findMany({ where: { id: { in: smartTaskIds } }, orderBy: { createdAt: "asc" } });
+    expect(rows).toHaveLength(3);
+    expect(rows.find((row) => row.title === "Review design")?.parentTaskId).toBeTruthy();
+    expect(rows.find((row) => row.title === "Ship the feature")?.parentTaskId).toBeNull();
+
+    const retried = await request(app).post("/api/smart-notes/save").set("Authorization", `Bearer ${token}`).send(payload);
+    expect(retried.status).toBe(200);
+    expect(retried.body.replayed).toBe(true);
+    expect(retried.body.taskIds).toEqual(smartTaskIds);
   });
 
   it("creates, updates, completes and lists tasks", async () => {
@@ -429,6 +471,9 @@ describe("MY OS API", () => {
   });
 
   it("cleans up created records", async () => {
+    if (smartNoteRequestId) await prisma.smartNoteRequest.deleteMany({ where: { requestId: smartNoteRequestId } });
+    if (smartNoteId) await prisma.note.deleteMany({ where: { id: smartNoteId } });
+    if (smartTaskIds.length) await prisma.task.deleteMany({ where: { id: { in: smartTaskIds } } });
     await request(app).delete(`/api/notes/${noteId}`).set("Authorization", `Bearer ${token}`);
     await request(app).delete(`/api/time-blocks/${blockId}`).set("Authorization", `Bearer ${token}`);
     await request(app).delete(`/api/tasks/${taskId}`).set("Authorization", `Bearer ${token}`);

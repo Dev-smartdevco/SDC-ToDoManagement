@@ -89,6 +89,23 @@ export const noteSchema = z.object({
   sharedWith: z.array(z.string().uuid()).max(50).optional(),
 });
 
+export const smartNoteSaveSchema = z.object({
+  requestId: z.string().uuid(),
+  title: z.string().trim().min(1).max(200),
+  content: z.string().max(20000),
+  projectId: z.string().uuid(),
+  originalDrawing: z.record(z.string(), z.unknown()).optional(),
+  saveNote: z.boolean().default(false),
+  createTasks: z.boolean().default(false),
+  tasks: z.array(z.object({
+    title: z.string().trim().min(1).max(200),
+    level: z.number().int().min(0).max(1),
+  })).max(100).default([]),
+}).refine((data) => !data.createTasks || data.tasks.length > 0, { message: "At least one task is required." })
+  .refine((data) => data.saveNote || data.createTasks, { message: "Choose at least one save option." })
+  .refine((data) => Buffer.byteLength(JSON.stringify(data.originalDrawing ?? {}), "utf8") <= 700_000,
+    { message: "Drawing data is too large." });
+
 export const timeBlockSchema = z.object({
   title: z.string().trim().min(1).max(120),
   projectId: z.string().uuid().optional().nullable(),
